@@ -1,5 +1,5 @@
 import type { ToolResult } from "./types"
-import { Bash, defineCommand } from "just-bash/browser"
+import { Bash, defineCommand, type CustomCommand } from "just-bash/browser"
 
 import {
     ObservableInMemoryFs,
@@ -36,6 +36,8 @@ type BrowserBashSessionOptions = {
     env?: Record<string, string>
     /** Options for the ObservableInMemoryFs */
     fsOptions?: ObservableInMemoryFsOptions
+    /** Additional custom commands to register alongside the built-in node/npm commands */
+    customCommands?: CustomCommand[]
 }
 
 type ExecuteBrowserBashOptions = {
@@ -108,6 +110,7 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
         customCommands: [
             defineCommand("node", async (args, ctx) => almostNodeSession.executeNode(args, ctx)),
             defineCommand("npm", async (args, ctx) => almostNodeSession.executeNpm(args, ctx)),
+            ...(options.customCommands ?? []),
         ],
     })
 

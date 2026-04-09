@@ -23,7 +23,7 @@ export type { ToolResult } from "./types"
 
 // Re-export just-bash/browser symbols so consumers don't need just-bash directly
 export { Bash, defineCommand } from "just-bash/browser"
-export type { CommandContext, ExecResult } from "just-bash/browser"
+export type { CommandContext, ExecResult, CustomCommand } from "just-bash/browser"
 
 // Re-export almostnode/server-bridge utilities
 // Explicitly typed to avoid exposing the almostnode/server-bridge subpath in .d.ts
