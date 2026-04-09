@@ -6,12 +6,19 @@ import { fileURLToPath } from "node:url"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(scriptDir, "..")
-const source = resolve(packageRoot, "node_modules", "almostnode", "dist", "__sw__.js")
-const destination = resolve(packageRoot, "dist", "__sw__.js")
+const distDir = resolve(packageRoot, "dist")
 
-if (!existsSync(source)) {
-    throw new Error(`Expected service worker asset at ${source}`)
+mkdirSync(distDir, { recursive: true })
+
+// Copy almostnode service worker
+const swSource = resolve(packageRoot, "node_modules", "almostnode", "dist", "__sw__.js")
+if (!existsSync(swSource)) {
+    throw new Error(`Expected service worker asset at ${swSource}`)
 }
+copyFileSync(swSource, resolve(distDir, "__sw__.js"))
 
-mkdirSync(dirname(destination), { recursive: true })
-copyFileSync(source, destination)
+// Copy brotli wasm binary (referenced by bundled brotli-wasm JS via import.meta.url)
+const brotliSource = resolve(packageRoot, "node_modules", "brotli-wasm", "pkg.bundler", "brotli_wasm_bg.wasm")
+if (existsSync(brotliSource)) {
+    copyFileSync(brotliSource, resolve(distDir, "brotli_wasm_bg.wasm"))
+}
