@@ -1,0 +1,37 @@
+{
+    "name": "agent-web-os",
+    "version": "0.1.0",
+    "description": "Browser-based bash + Node.js runtime with an observable in-memory filesystem",
+    "type": "module",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "require": "./dist/index.cjs"
+        },
+        "./__sw__.js": "./dist/__sw__.js"
+    },
+    "sideEffects": [
+        "./dist/__sw__.js"
+    ],
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsup && bun ./scripts/copy-sw.mjs",
+        "dev": "tsup --watch"
+    },
+    "dependencies": {
+        "almostnode": "^0.2.14",
+        "just-bash": "^2.14.0"
+    },
+    "devDependencies": {
+        "@types/node": "^25.5.2",
+        "tsup": "^8.4.0",
+        "typescript": "^5.8.3"
+    },
+    "license": "MIT"
+}
