@@ -1,6 +1,6 @@
 # agent-web-os
 
-Browser-based bash + Node.js runtime with an observable in-memory filesystem. Run shell commands, execute Node.js scripts, and manage files entirely in the browser — no server required.
+Browser-based operating system for your agents. Bash + Node.js + Python runtime with an observable in-memory filesystem. Install NPM or PIP packages, run shell commands, execute Node.js scripts, and manage files entirely in the browser — no server required. Supports Claude Code, Codex CLI, and OpenCode.
 
 ## Install
 
