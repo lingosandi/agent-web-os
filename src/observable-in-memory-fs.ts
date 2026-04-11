@@ -5,7 +5,7 @@ import {
     type MkdirOptions,
     type RmOptions,
 } from "just-bash"
-import path from "node:path"
+import { posixPath as path } from "./posix-path"
 
 type ObservableInMemoryFsWriteFileSyncOptions = Parameters<InMemoryFs["writeFileSync"]>[2]
 type ObservableInMemoryFsWriteFileSyncMetadata = Parameters<InMemoryFs["writeFileSync"]>[3]
@@ -125,7 +125,7 @@ function mapUnlinkEvent(entryType: ObservableInMemoryFsEntryType): ObservableInM
 }
 
 function normalizeFsPathForLogScope(fsPath: string): string {
-    const normalized = path.posix.normalize(fsPath)
+    const normalized = path.normalize(fsPath)
     return normalized === "." ? "/" : normalized
 }
 
@@ -139,7 +139,7 @@ function createWorkspacePathFilter(workspaceRoot: string): (fsPath: string) => b
             return false
         }
 
-        const relativePath = path.posix.relative(normalizedWorkspaceRoot, normalizedPath)
+        const relativePath = path.relative(normalizedWorkspaceRoot, normalizedPath)
         if (!relativePath || relativePath === ".") {
             return true
         }

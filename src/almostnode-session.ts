@@ -1,5 +1,5 @@
 import type { CommandContext, ExecResult } from "just-bash/browser"
-import path from "node:path"
+import { posixPath as path } from "./posix-path"
 import { PackageManager } from "almostnode/npm"
 import { Runtime } from "almostnode/runtime"
 import { getServerBridge } from "almostnode/server-bridge"
@@ -14,6 +14,7 @@ const ALMOSTNODE_INTERNAL_ROOT = "/.almostnode"
 const ALMOSTNODE_NODE_VERSION = "v20.0.0"
 const ALMOSTNODE_NPM_VERSION = "9.6.4"
 const NODE_EXEC_PATH = "/usr/local/bin/node"
+const GLOBAL_NODE_MODULES_ROOT = "/usr/local/lib/node_modules"
 const DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin:/node_modules/.bin"
 const NPM_USAGE = [
     "Usage: npm <command>",
@@ -128,7 +129,7 @@ function wrapCjsAsEsm(code: string, virtualPrefix = "", requestPath = ""): strin
     // (e.g. require('./cjs/react-is.development.js')) resolve correctly.
     // requestPath should be the *resolved* file path (with extension), so
     // dirname always gives the correct parent directory.
-    const requestDir = requestPath ? path.posix.dirname(requestPath) : ""
+    const requestDir = requestPath ? path.dirname(requestPath) : ""
 
     // Collect require() calls and replace them with references to
     // imported shim variables.  We only handle string-literal requires.
@@ -157,7 +158,7 @@ function wrapCjsAsEsm(code: string, virtualPrefix = "", requestPath = ""): strin
         const varName = `__cjs_req_${counter++}__`
         let resolvedSpec: string
         if (specifier.startsWith(".")) {
-            resolvedSpec = `${virtualPrefix}${path.posix.resolve(requestDir, specifier)}`
+            resolvedSpec = `${virtualPrefix}${path.resolve(requestDir, specifier)}`
         } else {
             resolvedSpec = `${virtualPrefix}/node_modules/${specifier}`
         }
@@ -287,7 +288,7 @@ async function ensureEsbuildWasm(): Promise<void> {
 }
 
 function normalizePath(inputPath: string): string {
-    return path.posix.normalize(inputPath.trim() || "/") || "/"
+    return path.normalize(inputPath.trim() || "/") || "/"
 }
 
 function isInternalAlmostNodePath(targetPath: string): boolean {
@@ -364,7 +365,7 @@ function removeVirtualPath(vfs: VirtualFS, targetPath: string): void {
     }
 
     for (const childName of vfs.readdirSync(normalizedPath)) {
-        removeVirtualPath(vfs, path.posix.join(normalizedPath, childName))
+        removeVirtualPath(vfs, path.join(normalizedPath, childName))
     }
 
     vfs.rmdirSync(normalizedPath)
@@ -774,11 +775,11 @@ export class AlmostNodeSession {
         body: TBody
         resolvedPath: string
     } | null> {
-        const basePath = normalizePath(path.posix.join(root, getRequestPathname(requestUrl)))
+        const basePath = normalizePath(path.join(root, getRequestPathname(requestUrl)))
 
         // When the request has no file extension, try common JS extensions
         // and also resolve directory package.json entry points
-        const hasExtension = /\.[a-zA-Z0-9]+$/.test(path.posix.basename(basePath))
+        const hasExtension = /\.[a-zA-Z0-9]+$/.test(path.basename(basePath))
         let candidates: string[]
         if (hasExtension) {
             candidates = [basePath]
@@ -793,7 +794,7 @@ export class AlmostNodeSession {
                     const entry = pkg
                         ? (typeof pkg.module === "string" && pkg.module) || (typeof pkg.main === "string" && pkg.main)
                         : null
-                    if (entry) candidates.push(normalizePath(path.posix.join(basePath, entry)))
+                    if (entry) candidates.push(normalizePath(path.join(basePath, entry)))
                 }
             } catch { /* ignore */ }
 
@@ -804,7 +805,7 @@ export class AlmostNodeSession {
                     const entry = pkg
                         ? (typeof pkg.module === "string" && pkg.module) || (typeof pkg.main === "string" && pkg.main)
                         : null
-                    if (entry) candidates.push(normalizePath(path.posix.join(basePath, entry)))
+                    if (entry) candidates.push(normalizePath(path.join(basePath, entry)))
                 }
             } catch { /* ignore */ }
         }
@@ -854,7 +855,7 @@ export class AlmostNodeSession {
 
                 // Populate VFS so subsequent requests are fast
                 this._vfs.withoutMirror(() => {
-                    this._vfs.mkdirSync(path.posix.dirname(targetPath), { recursive: true })
+                    this._vfs.mkdirSync(path.dirname(targetPath), { recursive: true })
                     this._vfs.writeFileSync(targetPath, content)
                 })
 
@@ -898,6 +899,30 @@ export class AlmostNodeSession {
         this.vitePreviewListener?.(null)
     }
 
+    private resolveBinFromPackageJson(
+        binName: string,
+        packageName: string,
+        pkgJson: Record<string, unknown>,
+        pkgDir: string,
+    ): string | null {
+        if (typeof pkgJson.bin === "string") {
+            const inferredBinName = typeof pkgJson.name === "string"
+                ? pkgJson.name.split("/").pop() ?? pkgJson.name
+                : packageName.split("/").pop() ?? packageName
+
+            if (binName === inferredBinName) {
+                return normalizePath(path.join(pkgDir, pkgJson.bin))
+            }
+        }
+
+        if (typeof pkgJson.bin === "object" && pkgJson.bin !== null && binName in pkgJson.bin) {
+            const namedBins = pkgJson.bin as Record<string, string>
+            return normalizePath(path.join(pkgDir, namedBins[binName]))
+        }
+
+        return null
+    }
+
     private async resolveNpmBinPath(binName: string, cwd: string): Promise<string | null> {
         const candidatePackageNames = [binName]
         const packageJsonResult = await this.readPackageJson(cwd)
@@ -910,8 +935,9 @@ export class AlmostNodeSession {
             }
         }
 
+        // Check local node_modules first
         for (const packageName of candidatePackageNames) {
-            const pkgJsonPath = normalizePath(path.posix.join(cwd, "node_modules", packageName, "package.json"))
+            const pkgJsonPath = normalizePath(path.join(cwd, "node_modules", packageName, "package.json"))
 
             if (!(await this.fs.exists(pkgJsonPath))) {
                 continue
@@ -924,28 +950,116 @@ export class AlmostNodeSession {
                     continue
                 }
 
-                const pkgDir = normalizePath(path.posix.join(cwd, "node_modules", packageName))
-
-                if (typeof pkgJson.bin === "string") {
-                    const inferredBinName = typeof pkgJson.name === "string"
-                        ? pkgJson.name.split("/").pop() ?? pkgJson.name
-                        : packageName.split("/").pop() ?? packageName
-
-                    if (binName === inferredBinName) {
-                        return normalizePath(path.posix.join(pkgDir, pkgJson.bin))
-                    }
-                }
-
-                if (typeof pkgJson.bin === "object" && pkgJson.bin !== null && binName in pkgJson.bin) {
-                    const namedBins = pkgJson.bin as Record<string, string>
-                    return normalizePath(path.posix.join(pkgDir, namedBins[binName]))
-                }
+                const pkgDir = normalizePath(path.join(cwd, "node_modules", packageName))
+                const result = this.resolveBinFromPackageJson(binName, packageName, pkgJson, pkgDir)
+                if (result) return result
             } catch {
                 // ignore parse errors
             }
         }
 
+        // Fallback: check global node_modules
+        const globalResult = await this.resolveGlobalBinPath(binName)
+        if (globalResult) return globalResult
+
         return null
+    }
+
+    private async resolveGlobalBinPath(binName: string): Promise<string | null> {
+        try {
+            const globalModulesDir = GLOBAL_NODE_MODULES_ROOT
+            if (!this._vfs.existsSync(globalModulesDir)) return null
+
+            const globalPackages = this._vfs.readdirSync(globalModulesDir)
+            for (const entry of globalPackages) {
+                const packageName = entry
+                const pkgJsonPath = normalizePath(path.join(globalModulesDir, packageName, "package.json"))
+
+                if (!this._vfs.existsSync(pkgJsonPath)) {
+                    // Check for scoped packages
+                    if (entry.startsWith("@")) {
+                        try {
+                            const scopeDir = normalizePath(path.join(globalModulesDir, entry))
+                            const scopedPackages = this._vfs.readdirSync(scopeDir)
+                            for (const scopedPkg of scopedPackages) {
+                                const scopedName = `${entry}/${scopedPkg}`
+                                const scopedPkgJsonPath = normalizePath(path.join(globalModulesDir, scopedName, "package.json"))
+                                if (!this._vfs.existsSync(scopedPkgJsonPath)) continue
+
+                                const raw = this._vfs.readFileSync(scopedPkgJsonPath, "utf8")
+                                const pkgJson = this.parseCachedPackageJson(scopedPkgJsonPath, raw)
+                                if (!pkgJson) continue
+
+                                const pkgDir = normalizePath(path.join(globalModulesDir, scopedName))
+                                const result = this.resolveBinFromPackageJson(binName, scopedName, pkgJson, pkgDir)
+                                if (result) return result
+                            }
+                        } catch { /* ignore */ }
+                    }
+                    continue
+                }
+
+                try {
+                    const raw = this._vfs.readFileSync(pkgJsonPath, "utf8")
+                    const pkgJson = this.parseCachedPackageJson(pkgJsonPath, raw)
+                    if (!pkgJson) continue
+
+                    const pkgDir = normalizePath(path.join(globalModulesDir, packageName))
+                    const result = this.resolveBinFromPackageJson(binName, packageName, pkgJson, pkgDir)
+                    if (result) return result
+                } catch { /* ignore */ }
+            }
+        } catch { /* ignore */ }
+
+        return null
+    }
+
+    private extractBinNames(pkgJson: Record<string, unknown>): string[] {
+        if (typeof pkgJson.bin === "string") {
+            const name = typeof pkgJson.name === "string"
+                ? pkgJson.name.split("/").pop() ?? ""
+                : ""
+            return name ? [name] : []
+        }
+
+        if (typeof pkgJson.bin === "object" && pkgJson.bin !== null) {
+            return Object.keys(pkgJson.bin)
+        }
+
+        return []
+    }
+
+    private async registerGlobalBinCommands(packageName: string): Promise<void> {
+        if (!this.binCommandRegistrar) return
+
+        const pkgJsonPath = normalizePath(path.join(GLOBAL_NODE_MODULES_ROOT, packageName, "package.json"))
+        if (!this._vfs.existsSync(pkgJsonPath)) return
+
+        try {
+            const raw = this._vfs.readFileSync(pkgJsonPath, "utf8")
+            const pkgJson = this.parseCachedPackageJson(pkgJsonPath, raw)
+            if (!pkgJson) return
+
+            const binNames = this.extractBinNames(pkgJson)
+            for (const binName of binNames) {
+                if (this.registeredBinCommands.has(binName)) continue
+                this.registeredBinCommands.add(binName)
+
+                this.binCommandRegistrar(binName, async (args, ctx) => {
+                    const resolvedPath = await this.resolveGlobalBinPath(binName)
+                        ?? await this.resolveNpmBinPath(binName, normalizePath(ctx.cwd))
+                    if (!resolvedPath) {
+                        return {
+                            stdout: "",
+                            stderr: `bash: ${binName}: command not found\n`,
+                            exitCode: 127,
+                        }
+                    }
+
+                    return this.executeNode([resolvedPath, ...args], ctx)
+                })
+            }
+        } catch { /* ignore */ }
     }
 
     private async resolveAndRegisterBinCommands(command: string, cwd: string): Promise<void> {
@@ -1046,7 +1160,7 @@ export class AlmostNodeSession {
 
             const content = await this.fs.readFileBuffer(normalizedPath)
             this._vfs.withoutMirror(() => {
-                this._vfs.mkdirSync(path.posix.dirname(normalizedPath), { recursive: true })
+                this._vfs.mkdirSync(path.dirname(normalizedPath), { recursive: true })
                 this._vfs.writeFileSync(normalizedPath, content)
             })
         } catch {
@@ -1133,7 +1247,7 @@ export class AlmostNodeSession {
 
             this._vfs.withoutMirror(() => {
                 for (const [filePath, content] of contents) {
-                    this._vfs.mkdirSync(path.posix.dirname(filePath), { recursive: true })
+                    this._vfs.mkdirSync(path.dirname(filePath), { recursive: true })
                     this._vfs.writeFileSync(filePath, content)
                 }
             })
@@ -1159,7 +1273,7 @@ export class AlmostNodeSession {
         const dependencyPaths: string[] = []
 
         for (const packageName of getPackageJsonDependencyNames(packageJsonResult.pkgJson)) {
-            const packageRoot = normalizePath(path.posix.join(cwd, "node_modules", packageName))
+            const packageRoot = normalizePath(path.join(cwd, "node_modules", packageName))
 
             if (!(await this.fs.exists(packageRoot))) {
                 continue
@@ -1204,7 +1318,7 @@ export class AlmostNodeSession {
             }
 
             await this.withSuppressedObservableMirroring(async () => {
-                await ensureObservableDirectory(this.fs, path.posix.dirname(normalizedPath))
+                await ensureObservableDirectory(this.fs, path.dirname(normalizedPath))
                 await this.fs.writeFile(normalizedPath, data)
             })
         })())
@@ -1245,7 +1359,7 @@ export class AlmostNodeSession {
             }
 
             await this.withSuppressedObservableMirroring(async () => {
-                await ensureObservableDirectory(this.fs, path.posix.dirname(normalizedNextPath))
+                await ensureObservableDirectory(this.fs, path.dirname(normalizedNextPath))
                 await this.fs.mv(normalizedPreviousPath, normalizedNextPath)
             })
         })())
@@ -1274,7 +1388,7 @@ export class AlmostNodeSession {
     }
 
     private async readPackageJson(cwd: string): Promise<{ pkgJson: PackageJsonLike } | { error: ExecResult }> {
-        const packageJsonPath = normalizePath(path.posix.join(cwd, "package.json"))
+        const packageJsonPath = normalizePath(path.join(cwd, "package.json"))
 
         if (!this.vfs.existsSync(packageJsonPath)) {
             await this.copyObservablePathIntoVirtualFs(packageJsonPath, { force: true })
@@ -1397,8 +1511,9 @@ export class AlmostNodeSession {
             ...baseEnv,
             npm_lifecycle_event: scriptName,
             PATH: Array.from(new Set([
-                normalizePath(path.posix.join(cwd, "node_modules/.bin")),
+                normalizePath(path.join(cwd, "node_modules/.bin")),
                 "/node_modules/.bin",
+                `${GLOBAL_NODE_MODULES_ROOT}/.bin`,
                 ...(baseEnv.PATH?.trim() || DEFAULT_PATH).split(":").filter(Boolean),
             ])).join(":"),
         }
@@ -1479,28 +1594,38 @@ export class AlmostNodeSession {
             case "install":
             case "i":
             case "add": {
+                const isGlobal = args.includes("-g") || args.includes("--global")
                 const packageSpecs = args.slice(1).filter((arg) => !arg.startsWith("-"))
                 let stdout = ""
 
                 try {
-                    const packageJsonResult = await this.readPackageJson(cwd)
-                    if ("error" in packageJsonResult) {
-                        result = packageJsonResult.error
-                        break
-                    }
+                    if (isGlobal) {
+                        if (packageSpecs.length === 0) {
+                            result = { stdout: "", stderr: "npm ERR! npm install -g requires a package name\n", exitCode: 1 }
+                            break
+                        }
 
-                    await ensureEsbuildWasm()
+                        await ensureEsbuildWasm()
 
-                    const packageManager = new PackageManager(this.vfs, { cwd })
+                        // Ensure the global node_modules directory exists
+                        this._vfs.mkdirSync(GLOBAL_NODE_MODULES_ROOT, { recursive: true })
+                        await ensureObservableDirectory(this.fs, GLOBAL_NODE_MODULES_ROOT)
 
-                    if (packageSpecs.length === 0) {
-                        const installResult = await packageManager.installFromPackageJson({
-                            onProgress: (message) => {
-                                stdout += `${message}\n`
-                            },
-                        })
-                        stdout += `added ${installResult.added.length} packages\n`
-                    } else {
+                        // Ensure a minimal package.json exists at the global prefix
+                        const globalPkgJsonPath = normalizePath(path.join(GLOBAL_NODE_MODULES_ROOT, "..", "package.json"))
+                        if (!this._vfs.existsSync(globalPkgJsonPath)) {
+                            const minimalPkg = JSON.stringify({ name: "global", version: "0.0.0", private: true }, null, 2)
+                            this._vfs.mkdirSync(path.dirname(globalPkgJsonPath), { recursive: true })
+                            this._vfs.writeFileSync(globalPkgJsonPath, minimalPkg)
+                            await this.withSuppressedObservableMirroring(async () => {
+                                await ensureObservableDirectory(this.fs, path.dirname(globalPkgJsonPath))
+                                await this.fs.writeFile(globalPkgJsonPath, minimalPkg)
+                            })
+                        }
+
+                        const globalCwd = normalizePath(path.join(GLOBAL_NODE_MODULES_ROOT, ".."))
+                        const packageManager = new PackageManager(this.vfs, { cwd: globalCwd })
+
                         for (const packageSpec of packageSpecs) {
                             const installResult = await packageManager.install(packageSpec, {
                                 save: true,
@@ -1509,10 +1634,53 @@ export class AlmostNodeSession {
                                 },
                             })
                             stdout += `added ${installResult.added.length} packages\n`
-                        }
-                    }
 
-                    result = { stdout, stderr: "", exitCode: 0 }
+                            // Register bin commands from the installed global package
+                            const installedPkgName = packageSpec.replace(/@[^/]*$/, "") || packageSpec
+                            await this.registerGlobalBinCommands(installedPkgName)
+
+                            // Also try to register by checking what was actually installed
+                            for (const added of installResult.added) {
+                                const addedName = typeof added === "string" ? String(added).replace(/@[^/]*$/, "") : (added as { name?: string })?.name
+                                if (addedName && addedName !== installedPkgName) {
+                                    await this.registerGlobalBinCommands(addedName)
+                                }
+                            }
+                        }
+
+                        result = { stdout, stderr: "", exitCode: 0 }
+                    } else {
+                        const packageJsonResult = await this.readPackageJson(cwd)
+                        if ("error" in packageJsonResult) {
+                            result = packageJsonResult.error
+                            break
+                        }
+
+                        await ensureEsbuildWasm()
+
+                        const packageManager = new PackageManager(this.vfs, { cwd })
+
+                        if (packageSpecs.length === 0) {
+                            const installResult = await packageManager.installFromPackageJson({
+                                onProgress: (message) => {
+                                    stdout += `${message}\n`
+                                },
+                            })
+                            stdout += `added ${installResult.added.length} packages\n`
+                        } else {
+                            for (const packageSpec of packageSpecs) {
+                                const installResult = await packageManager.install(packageSpec, {
+                                    save: true,
+                                    onProgress: (message) => {
+                                        stdout += `${message}\n`
+                                    },
+                                })
+                                stdout += `added ${installResult.added.length} packages\n`
+                            }
+                        }
+
+                        result = { stdout, stderr: "", exitCode: 0 }
+                    }
                 } catch (error) {
                     result = {
                         stdout,
@@ -1619,9 +1787,9 @@ export class AlmostNodeSession {
                     }
                 }
 
-                const scriptPath = path.posix.isAbsolute(firstArg)
+                const scriptPath = path.isAbsolute(firstArg)
                     ? normalizePath(firstArg)
-                    : normalizePath(path.posix.resolve(cwd, firstArg))
+                    : normalizePath(path.resolve(cwd, firstArg))
 
                 return {
                     kind: "run-file",
@@ -1860,7 +2028,7 @@ export class AlmostNodeSession {
                 return true
             }
 
-            const baseName = path.posix.basename(targetPath).toLowerCase()
+            const baseName = path.basename(targetPath).toLowerCase()
             if (baseName === "package.json") {
                 return true
             }
@@ -1892,7 +2060,7 @@ export class AlmostNodeSession {
             })
             this._vfs.withoutMirror(() => {
                 for (const [filePath, content] of contents) {
-                    this._vfs.mkdirSync(path.posix.dirname(filePath), { recursive: true })
+                    this._vfs.mkdirSync(path.dirname(filePath), { recursive: true })
                     this._vfs.writeFileSync(filePath, content)
                 }
             })
