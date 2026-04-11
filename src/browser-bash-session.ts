@@ -66,12 +66,6 @@ function normalizeBashPath(input: string): string {
     return (isAbsolute ? "/" : "") + segments.join("/") || "/"
 }
 
-/** Clamp a number value within bounds, using fallback when undefined */
-function clampInteger(value: number | undefined, min: number, max: number, fallback: number): number {
-    const v = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback
-    return Math.max(min, Math.min(max, v))
-}
-
 /** Truncate command output to a byte limit */
 function truncateBashOutput(output: string, limitBytes = DEFAULT_BASH_OUTPUT_LIMIT): string {
     if (!output || output.length <= limitBytes) {
@@ -82,15 +76,6 @@ function truncateBashOutput(output: string, limitBytes = DEFAULT_BASH_OUTPUT_LIM
     const tailBytes = limitBytes - headBytes
     const omittedBytes = output.length - headBytes - tailBytes
     return `${output.slice(0, headBytes)}\n\n... [${omittedBytes} bytes truncated] ...\n\n${output.slice(-tailBytes)}`
-}
-
-/** Get the parent directory of a path */
-function getParentPath(filePath: string): string {
-    const lastSlash = filePath.lastIndexOf("/")
-    if (lastSlash <= 0) {
-        return "/"
-    }
-    return filePath.slice(0, lastSlash)
 }
 
 /** Create a browser-based bash session with in-memory filesystem and almostnode */

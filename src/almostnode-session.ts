@@ -518,15 +518,6 @@ export class AlmostNodeSession {
      */
     private resolveBarePkgEntryCache = new Map<string, string | null>()
 
-    /**
-     * Packages whose imports are handled by the browser import map.
-     * These are NOT rewritten to /node_modules/... paths.
-     * Now empty: react/react-dom are served from node_modules via our
-     * CJS→ESM shim, which supports the actual installed version rather
-     * than the outdated esm.sh CDN pinned in almostnode's import map.
-     */
-    private importMapPackages = new Set<string>()
-
     private parseCachedPackageJson(packageJsonPath: string, raw: string): Record<string, unknown> | null {
         const cached = this.parsedPackageJsonCache.get(packageJsonPath)
         if (cached && cached.raw === raw) {
@@ -588,9 +579,6 @@ export class AlmostNodeSession {
                 subPath = specifier.slice(slashIdx + 1)
             }
         }
-
-        // Skip packages handled by the browser import map (CDN ESM)
-        if (this.importMapPackages.has(pkgName)) return null
 
         const nodeModulesPath = `${root}/node_modules/${pkgName}`
         const pkgJsonPath = `${nodeModulesPath}/package.json`
@@ -1014,21 +1002,6 @@ export class AlmostNodeSession {
         return null
     }
 
-    private extractBinNames(pkgJson: Record<string, unknown>): string[] {
-        if (typeof pkgJson.bin === "string") {
-            const name = typeof pkgJson.name === "string"
-                ? pkgJson.name.split("/").pop() ?? ""
-                : ""
-            return name ? [name] : []
-        }
-
-        if (typeof pkgJson.bin === "object" && pkgJson.bin !== null) {
-            return Object.keys(pkgJson.bin)
-        }
-
-        return []
-    }
-
     private async registerGlobalBinCommands(packageName: string): Promise<void> {
         if (!this.binCommandRegistrar) return
 
@@ -1040,7 +1013,18 @@ export class AlmostNodeSession {
             const pkgJson = this.parseCachedPackageJson(pkgJsonPath, raw)
             if (!pkgJson) return
 
-            const binNames = this.extractBinNames(pkgJson)
+            let binNames: string[]
+            if (typeof pkgJson.bin === "string") {
+                const name = typeof pkgJson.name === "string"
+                    ? pkgJson.name.split("/").pop() ?? ""
+                    : ""
+                binNames = name ? [name] : []
+            } else if (typeof pkgJson.bin === "object" && pkgJson.bin !== null) {
+                binNames = Object.keys(pkgJson.bin)
+            } else {
+                binNames = []
+            }
+
             for (const binName of binNames) {
                 if (this.registeredBinCommands.has(binName)) continue
                 this.registeredBinCommands.add(binName)

@@ -58,14 +58,6 @@ export function assertObservableInMemoryFs(value: unknown): ObservableInMemoryFs
     return value
 }
 
-function formatChangeEventForLog(event: ObservableInMemoryFsChangeEvent): string {
-    const previousPathSuffix = event.previousPath
-        ? ` (from ${event.previousPath})`
-        : ""
-
-    return `[ObservableInMemoryFs] ${event.event} ${event.entryType} ${event.path}${previousPathSuffix}`
-}
-
 type ObservableInMemoryFsListener = (event: ObservableInMemoryFsChangeEvent) => void
 
 type ObservableInMemoryFsPathState = {
@@ -75,22 +67,6 @@ type ObservableInMemoryFsPathState = {
 
 type ObservableInMemoryFsEmitOptions = {
     shouldConsoleLog?: boolean
-}
-
-function normalizeEntryType(stat: {
-    isDirectory: boolean
-    isFile: boolean
-    isSymbolicLink: boolean
-}): ObservableInMemoryFsEntryType {
-    if (stat.isDirectory) {
-        return "directory"
-    }
-
-    if (stat.isSymbolicLink) {
-        return "symlink"
-    }
-
-    return "file"
 }
 
 async function readPathState(
@@ -110,9 +86,14 @@ async function readPathState(
     }
 
     const stat = await fs.lstat(path)
+    const entryType: ObservableInMemoryFsEntryType = stat.isDirectory
+        ? "directory"
+        : stat.isSymbolicLink
+            ? "symlink"
+            : "file"
     return {
         exists: true,
-        entryType: normalizeEntryType(stat),
+        entryType,
     }
 }
 
@@ -120,34 +101,9 @@ function mapAddEvent(entryType: ObservableInMemoryFsEntryType): ObservableInMemo
     return entryType === "directory" ? "addDir" : "add"
 }
 
-function mapUnlinkEvent(entryType: ObservableInMemoryFsEntryType): ObservableInMemoryFsChangeEventName {
-    return entryType === "directory" ? "unlinkDir" : "unlink"
-}
-
 function normalizeFsPathForLogScope(fsPath: string): string {
     const normalized = path.normalize(fsPath)
     return normalized === "." ? "/" : normalized
-}
-
-function createWorkspacePathFilter(workspaceRoot: string): (fsPath: string) => boolean {
-    const normalizedWorkspaceRoot = normalizeFsPathForLogScope(workspaceRoot)
-
-    return (fsPath: string) => {
-        const normalizedPath = normalizeFsPathForLogScope(fsPath)
-
-        if (normalizedPath !== normalizedWorkspaceRoot && !normalizedPath.startsWith(`${normalizedWorkspaceRoot}/`)) {
-            return false
-        }
-
-        const relativePath = path.relative(normalizedWorkspaceRoot, normalizedPath)
-        if (!relativePath || relativePath === ".") {
-            return true
-        }
-
-        return relativePath
-            .split("/")
-            .every((segment) => segment.length > 0 && !segment.startsWith("."))
-    }
 }
 
 export class ObservableInMemoryFs extends InMemoryFs {
@@ -162,7 +118,24 @@ export class ObservableInMemoryFs extends InMemoryFs {
     constructor(options?: ObservableInMemoryFsOptions) {
         super()
         this.consoleLogChanges = options?.consoleLogChanges ?? false
-        this.isLoggableWorkspacePath = createWorkspacePathFilter(options?.workspaceRoot ?? "/")
+
+        const normalizedWorkspaceRoot = normalizeFsPathForLogScope(options?.workspaceRoot ?? "/")
+        this.isLoggableWorkspacePath = (fsPath: string) => {
+            const normalizedPath = normalizeFsPathForLogScope(fsPath)
+
+            if (normalizedPath !== normalizedWorkspaceRoot && !normalizedPath.startsWith(`${normalizedWorkspaceRoot}/`)) {
+                return false
+            }
+
+            const relativePath = path.relative(normalizedWorkspaceRoot, normalizedPath)
+            if (!relativePath || relativePath === ".") {
+                return true
+            }
+
+            return relativePath
+                .split("/")
+                .every((segment) => segment.length > 0 && !segment.startsWith("."))
+        }
     }
 
     isPathLazy(filePath: string): boolean {
@@ -261,7 +234,7 @@ export class ObservableInMemoryFs extends InMemoryFs {
             && shouldConsoleLog
             && !this.areConsoleLogsSuppressed()
         ) {
-            console.log(formatChangeEventForLog(event))
+            console.log(`[ObservableInMemoryFs] ${event.event} ${event.entryType} ${event.path}${event.previousPath ? ` (from ${event.previousPath})` : ""}`)
         }
 
         if (!this.listeners) {
@@ -375,7 +348,7 @@ export class ObservableInMemoryFs extends InMemoryFs {
         }
 
         this.emit({
-            event: mapUnlinkEvent(previous.entryType),
+            event: previous.entryType === "directory" ? "unlinkDir" : "unlink",
             path,
             entryType: previous.entryType,
         }, options)
