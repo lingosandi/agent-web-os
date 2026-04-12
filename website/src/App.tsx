@@ -27,10 +27,10 @@ function useTerminal() {
         void executeBrowserBash(session, command, { truncateOutput: false }).then((result) => {
             const remaining = result.stdout?.slice(streamedBytesRef.current)
             if (remaining) {
-                terminal.write(remaining.replace(/\n/g, "\r\n"))
+                terminal.write(remaining)
             }
             if (result.stderr) {
-                terminal.write(result.stderr.replace(/\n/g, "\r\n"))
+                terminal.write(result.stderr)
             }
         }).catch((err: unknown) => {
             const message = err instanceof Error ? err.message : "Command failed"
@@ -88,10 +88,10 @@ function useTerminal() {
                 void executeBrowserBash(session, command, { truncateOutput: false }).then((result) => {
                     const remaining = result.stdout?.slice(streamedBytesRef.current)
                     if (remaining) {
-                        terminal.write(remaining.replace(/\n/g, "\r\n"))
+                        terminal.write(remaining)
                     }
                     if (result.stderr) {
-                        terminal.write(result.stderr.replace(/\n/g, "\r\n"))
+                        terminal.write(result.stderr)
                     }
                 }).catch((err: unknown) => {
                     const message = err instanceof Error ? err.message : "Command failed"
@@ -120,6 +120,7 @@ function useTerminal() {
 
         const terminal = new Terminal({
             cursorBlink: true,
+            convertEol: true,
             fontSize: 13,
             fontFamily: "'IBM Plex Mono', 'JetBrains Mono', 'Fira Code', Menlo, monospace",
             theme: {
@@ -138,7 +139,7 @@ function useTerminal() {
 
         session.almostNodeSession.setStdoutWriter((data) => {
             streamedBytesRef.current += data.length
-            terminal.write(data.replace(/\n/g, "\r\n"))
+            terminal.write(data)
         })
 
         session.almostNodeSession.setTerminalSize(terminal.cols, terminal.rows)

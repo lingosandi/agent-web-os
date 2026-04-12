@@ -2257,6 +2257,20 @@ exports.LRUCache = LRUCache;
         stdoutAny.rows = this._terminalRows
         stdoutAny.getWindowSize = () => [this._terminalColumns, this._terminalRows]
 
+        // Shim stdin.setRawMode so TUI apps don't crash; track calls as
+        // an interactivity signal for the exit-detection heuristic below.
+        let rawModeRequested = false
+        if (process.stdin) {
+            const originalSetRawMode = process.stdin.setRawMode
+            process.stdin.setRawMode = (mode: boolean) => {
+                rawModeRequested = rawModeRequested || mode
+                if (typeof originalSetRawMode === "function") {
+                    return originalSetRawMode.call(process.stdin, mode)
+                }
+                return process.stdin
+            }
+        }
+
         // Forward stdin from the host terminal into process.stdin
         this._stdinHandler = process.stdin
             ? (data: string) => { process.stdin.emit("data", data) }
@@ -2308,6 +2322,15 @@ exports.LRUCache = LRUCache;
         process.argv0 = "node"
         process.execPath = NODE_EXEC_PATH
 
+        // Shim process.pid and process.kill so TUI apps (e.g. pi-coding-agent)
+        // that call process.kill(process.pid, signal) don't crash
+        if (process.pid == null) {
+            process.pid = 1
+        }
+        if (typeof process.kill !== "function") {
+            process.kill = () => { /* no-op in browser */ }
+        }
+
         const rejectionHandler = (event: PromiseRejectionEvent) => {
             const reason = event.reason
             if (reason instanceof Error && reason.message.startsWith("Process exited with code")) {
@@ -2331,15 +2354,15 @@ exports.LRUCache = LRUCache;
 
             syncExecution = false
 
-            // Yield to the event loop so that async entry points
-            // (e.g. `async function main(){ … }; main()`) have a chance
-            // to register stdin listeners before we check.
-            await new Promise<void>((r) => setTimeout(r, 0))
-
             // If the process registered stdin listeners (interactive / TUI), keep
             // it alive until process.exit() is called instead of exiting after 0 ms.
-            const isInteractive = process.stdin
+            // Yield a tick first so async main() functions (like pi-coding-agent)
+            // have a chance to register listeners / call setRawMode before we check.
+            await new Promise<void>((resolve) => { setTimeout(resolve, 0) })
+
+            const hasStdinListeners = process.stdin
                 && (process.stdin.listenerCount("data") > 0 || process.stdin.listenerCount("keypress") > 0)
+            const isInteractive = hasStdinListeners || rawModeRequested
             const asyncExitCode = isInteractive
                 ? await exitPromise
                 : await Promise.race<number | null>([

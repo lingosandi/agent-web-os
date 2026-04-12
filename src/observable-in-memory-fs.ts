@@ -85,15 +85,20 @@ async function readPathState(
         }
     }
 
-    const stat = await fs.lstat(path)
-    const entryType: ObservableInMemoryFsEntryType = stat.isDirectory
-        ? "directory"
-        : stat.isSymbolicLink
-            ? "symlink"
-            : "file"
-    return {
-        exists: true,
-        entryType,
+    try {
+        const stat = await fs.lstat(path)
+        const entryType: ObservableInMemoryFsEntryType = stat.isDirectory
+            ? "directory"
+            : stat.isSymbolicLink
+                ? "symlink"
+                : "file"
+        return {
+            exists: true,
+            entryType,
+        }
+    } catch {
+        // Path may have been removed between exists() and lstat() (TOCTOU race)
+        return { exists: false }
     }
 }
 
