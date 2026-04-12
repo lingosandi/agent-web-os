@@ -1117,61 +1117,238 @@ export class AlmostNodeSession {
     }
 
     /**
-     * Patch lru-cache installations so the CJS entry doesn't crash in
-     * the browser runtime.  lru-cache v11's CJS unconditionally calls
-     * `require("node:diagnostics_channel").tracingChannel()` at the
-     * module scope.  If that throws inside the browser WASM sandbox the
-     * entire module fails and `exports.LRUCache` is never assigned,
-     * leading to "TypeError: LRUCache is not a constructor".
+     * Replace lru-cache CJS entry points with a browser-safe implementation.
      *
-     * The fix: wrap the `require("node:diagnostics_channel")` call in a
-     * try/catch with a no-op fallback so LRUCache initialises safely.
+     * lru-cache v11's minified CJS uses `require("node:diagnostics_channel")`
+     * and private class fields (`static #t`) which can fail inside the browser
+     * WASM runtime's `eval()` context, leaving `exports.LRUCache` undefined
+     * ("TypeError: LRUCache is not a constructor").
+     *
+     * The fix: overwrite the CJS entry with a clean Map-based LRU cache that
+     * covers the full API surface used by lru-cache consumers (hosted-git-info,
+     * path-scurry, glob, etc.) without any diagnostics_channel dependency or
+     * private class fields.
      */
     private patchLruCacheInNodeModules(nodeModulesDir: string): void {
-        const patchFile = (filePath: string) => {
-            if (!this._vfs.existsSync(filePath)) return
-            const src = this._vfs.readFileSync(filePath, "utf8") as string
-            if (!src.includes('require("node:diagnostics_channel")')) return
-            const patched = src.replace(
-                'require("node:diagnostics_channel")',
-                '(function(){try{var _dc=require("node:diagnostics_channel");var _ch=_dc.channel("lru-cache:_test");if(typeof _dc.tracingChannel==="function")_dc.tracingChannel("lru-cache:_test");return _dc}catch(_e){return{channel:function(){return{hasSubscribers:false,publish:function(){},subscribe:function(){},unsubscribe:function(){}}},tracingChannel:function(){return{hasSubscribers:false,subscribe:function(){},unsubscribe:function(){}}}}}})()',
-            )
-            if (patched !== src) {
-                this._vfs.writeFileSync(filePath, patched)
+        const lruCacheShim = `"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.LRUCache = void 0;
+var LRUCache = (function () {
+  function LRUCache(options) {
+    if (typeof options === "number") options = { max: options };
+    if (!options) options = {};
+    this._max = options.max || Infinity;
+    this._maxSize = options.maxSize || 0;
+    this._sizeCalculation = options.sizeCalculation || null;
+    this._dispose = options.dispose || null;
+    this._allowStale = !!options.allowStale;
+    this._ttl = options.ttl || 0;
+    this._noUpdateTTL = !!options.noUpdateTTL;
+    this._map = new Map();
+    this._order = [];
+    this._sizes = new Map();
+    this._totalSize = 0;
+    this._timers = new Map();
+  }
+  Object.defineProperty(LRUCache.prototype, "size", { get: function () { return this._map.size; } });
+  Object.defineProperty(LRUCache.prototype, "max", { get: function () { return this._max; } });
+  Object.defineProperty(LRUCache.prototype, "maxSize", { get: function () { return this._maxSize; } });
+  Object.defineProperty(LRUCache.prototype, "calculatedSize", { get: function () { return this._totalSize; } });
+  LRUCache.prototype._touch = function (key) {
+    var idx = this._order.indexOf(key);
+    if (idx > -1) this._order.splice(idx, 1);
+    this._order.push(key);
+  };
+  LRUCache.prototype._evict = function () {
+    while (this._order.length > 0 && (this._map.size > this._max || (this._maxSize > 0 && this._totalSize > this._maxSize))) {
+      var oldest = this._order.shift();
+      if (oldest !== undefined && this._map.has(oldest)) {
+        var val = this._map.get(oldest);
+        this._map.delete(oldest);
+        if (this._sizes.has(oldest)) { this._totalSize -= this._sizes.get(oldest); this._sizes.delete(oldest); }
+        if (this._timers.has(oldest)) { clearTimeout(this._timers.get(oldest)); this._timers.delete(oldest); }
+        if (this._dispose) this._dispose(val, oldest, "evict");
+      }
+    }
+  };
+  LRUCache.prototype._isStale = function (key) {
+    return false; // TTL timers handle expiry via delete
+  };
+  LRUCache.prototype.set = function (key, value, options) {
+    if (value === undefined) { this.delete(key); return this; }
+    var opts = options || {};
+    var size = 0;
+    if (this._maxSize > 0) {
+      size = opts.size || 0;
+      if (!size && this._sizeCalculation) size = this._sizeCalculation(value, key);
+      if (size > this._maxSize) return this;
+    }
+    if (this._map.has(key)) {
+      var old = this._map.get(key);
+      if (this._sizes.has(key)) { this._totalSize -= this._sizes.get(key); }
+      if (this._timers.has(key)) { clearTimeout(this._timers.get(key)); this._timers.delete(key); }
+      if (this._dispose && !opts.noDisposeOnSet) this._dispose(old, key, "set");
+    }
+    this._map.set(key, value);
+    this._touch(key);
+    if (this._maxSize > 0 && size > 0) { this._sizes.set(key, size); this._totalSize += size; }
+    var ttl = opts.ttl !== undefined ? opts.ttl : this._ttl;
+    if (ttl > 0) {
+      var self = this;
+      this._timers.set(key, setTimeout(function () { self.delete(key); }, ttl));
+    }
+    this._evict();
+    return this;
+  };
+  LRUCache.prototype.get = function (key, options) {
+    if (!this._map.has(key)) return undefined;
+    var value = this._map.get(key);
+    this._touch(key);
+    return value;
+  };
+  LRUCache.prototype.peek = function (key) {
+    return this._map.get(key);
+  };
+  LRUCache.prototype.has = function (key) {
+    return this._map.has(key);
+  };
+  LRUCache.prototype.delete = function (key) {
+    if (!this._map.has(key)) return false;
+    var val = this._map.get(key);
+    this._map.delete(key);
+    var idx = this._order.indexOf(key);
+    if (idx > -1) this._order.splice(idx, 1);
+    if (this._sizes.has(key)) { this._totalSize -= this._sizes.get(key); this._sizes.delete(key); }
+    if (this._timers.has(key)) { clearTimeout(this._timers.get(key)); this._timers.delete(key); }
+    if (this._dispose) this._dispose(val, key, "delete");
+    return true;
+  };
+  LRUCache.prototype.clear = function () {
+    var self = this;
+    if (this._dispose) {
+      this._map.forEach(function (val, key) { self._dispose(val, key, "delete"); });
+    }
+    this._timers.forEach(function (t) { clearTimeout(t); });
+    this._map.clear();
+    this._order.length = 0;
+    this._sizes.clear();
+    this._totalSize = 0;
+    this._timers.clear();
+  };
+  LRUCache.prototype.keys = function () { return this._map.keys(); };
+  LRUCache.prototype.values = function () { return this._map.values(); };
+  LRUCache.prototype.entries = function () { return this._map.entries(); };
+  LRUCache.prototype.find = function (fn, options) {
+    for (var it = this._map.entries(), r; !(r = it.next()).done;) {
+      if (fn(r.value[1], r.value[0], this)) return this.get(r.value[0], options);
+    }
+  };
+  LRUCache.prototype.forEach = function (fn, thisArg) {
+    var self = this;
+    this._map.forEach(function (val, key) { fn.call(thisArg || self, val, key, self); });
+  };
+  LRUCache.prototype.dump = function () { return []; };
+  LRUCache.prototype.load = function (arr) {
+    this.clear();
+    for (var i = 0; i < arr.length; i++) { this.set(arr[i][0], arr[i][1].value, arr[i][1]); }
+  };
+  LRUCache.prototype.pop = function () {
+    if (this._order.length === 0) return undefined;
+    var oldest = this._order[0];
+    var val = this._map.get(oldest);
+    this.delete(oldest);
+    return val;
+  };
+  LRUCache.prototype.purgeStale = function () { return false; };
+  LRUCache.prototype.getRemainingTTL = function (key) { return this._map.has(key) ? Infinity : 0; };
+  LRUCache.prototype.info = function (key) {
+    if (!this._map.has(key)) return undefined;
+    return { value: this._map.get(key) };
+  };
+  LRUCache.prototype[Symbol.iterator] = function () { return this._map.entries(); };
+  LRUCache.prototype[Symbol.toStringTag] = "LRUCache";
+  return LRUCache;
+})();
+exports.LRUCache = LRUCache;
+`
+
+        const patchDir = (lruDir: string) => {
+            // Overwrite all possible CJS entry points
+            const cjsPaths = [
+                normalizePath(path.join(lruDir, "dist", "commonjs", "index.min.js")),
+                normalizePath(path.join(lruDir, "dist", "commonjs", "index.js")),
+                // Also try the package root index (lru-cache v7 style)
+                normalizePath(path.join(lruDir, "index.js")),
+            ]
+            let patched = false
+            for (const p of cjsPaths) {
+                if (this._vfs.existsSync(p)) {
+                    this._vfs.writeFileSync(p, lruCacheShim)
+                    patched = true
+                }
             }
+            // If no known entry was found, check package.json for the actual main field
+            if (!patched) {
+                const pkgPath = normalizePath(path.join(lruDir, "package.json"))
+                if (this._vfs.existsSync(pkgPath)) {
+                    try {
+                        const pkg = JSON.parse(this._vfs.readFileSync(pkgPath, "utf8") as string)
+                        const mainField = pkg.main || pkg.exports?.["."]?.require?.default || pkg.exports?.["."]?.require
+                        if (mainField && typeof mainField === "string") {
+                            const mainPath = normalizePath(path.join(lruDir, mainField))
+                            if (this._vfs.existsSync(mainPath)) {
+                                this._vfs.writeFileSync(mainPath, lruCacheShim)
+                                patched = true
+                            }
+                        }
+                    } catch { /* ignore parse errors */ }
+                }
+            }
+            return patched
         }
 
-        // Walk node_modules (one level of nesting + scoped packages)
+        // Recursively find all lru-cache directories in node_modules
+        let patchCount = 0
         const walkNodeModules = (nmDir: string) => {
             if (!this._vfs.existsSync(nmDir)) return
-            for (const entry of this._vfs.readdirSync(nmDir)) {
+            let entries: string[]
+            try {
+                entries = this._vfs.readdirSync(nmDir)
+            } catch { return }
+            for (const entry of entries) {
                 if (entry === "lru-cache") {
-                    const cjsEntry = normalizePath(path.join(nmDir, "lru-cache", "dist", "commonjs", "index.min.js"))
-                    patchFile(cjsEntry)
-                    const cjsIndex = normalizePath(path.join(nmDir, "lru-cache", "dist", "commonjs", "index.js"))
-                    patchFile(cjsIndex)
-                }
-                // Check nested node_modules inside each package
-                const nestedNm = normalizePath(path.join(nmDir, entry, "node_modules"))
-                if (this._vfs.existsSync(nestedNm)) {
-                    walkNodeModules(nestedNm)
+                    const lruDir = normalizePath(path.join(nmDir, "lru-cache"))
+                    if (patchDir(lruDir)) patchCount++
                 }
                 // Scoped packages (@scope/pkg)
                 if (entry.startsWith("@")) {
                     const scopeDir = normalizePath(path.join(nmDir, entry))
-                    if (this._vfs.existsSync(scopeDir)) {
+                    try {
                         for (const scopedEntry of this._vfs.readdirSync(scopeDir)) {
-                            const nestedNm2 = normalizePath(path.join(scopeDir, scopedEntry, "node_modules"))
-                            if (this._vfs.existsSync(nestedNm2)) {
-                                walkNodeModules(nestedNm2)
+                            // Check for lru-cache nested inside scoped package
+                            const nestedNm = normalizePath(path.join(scopeDir, scopedEntry, "node_modules"))
+                            if (this._vfs.existsSync(nestedNm)) {
+                                walkNodeModules(nestedNm)
                             }
                         }
+                    } catch { /* ignore */ }
+                } else {
+                    // Check nested node_modules inside each package
+                    const nestedNm = normalizePath(path.join(nmDir, entry, "node_modules"))
+                    if (this._vfs.existsSync(nestedNm)) {
+                        walkNodeModules(nestedNm)
                     }
                 }
             }
         }
 
         walkNodeModules(nodeModulesDir)
+
+        if (patchCount === 0) {
+            console.warn(`[agent-web-os] lru-cache patch: no lru-cache found in ${nodeModulesDir}`)
+        } else {
+            console.log(`[agent-web-os] lru-cache patch: patched ${patchCount} installation(s) in ${nodeModulesDir}`)
+        }
     }
 
     private async registerGlobalBinCommands(packageName: string): Promise<void> {
