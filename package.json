@@ -22,7 +22,8 @@
     ],
     "scripts": {
         "build": "tsup && bun ./scripts/copy-sw.mjs",
-        "dev": "tsup --watch"
+        "dev": "tsup --watch",
+        "test": "vitest run"
     },
     "dependencies": {
         "almostnode": "^0.2.14",
@@ -31,7 +32,8 @@
     "devDependencies": {
         "@types/node": "^25.5.2",
         "tsup": "^8.4.0",
-        "typescript": "^5.8.3"
+        "typescript": "^5.8.3",
+        "vitest": "^4.1.4"
     },
     "license": "MIT"
 }
