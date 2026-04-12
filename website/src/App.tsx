@@ -15,13 +15,11 @@ function useTerminal() {
     const runningRef = useRef(false)
     const streamedBytesRef = useRef(0)
 
-    const runCommand = useCallback((command: string) => {
+    const executeCommand = useCallback((command: string) => {
         const terminal = terminalRef.current
         const session = sessionRef.current
-        if (!terminal || !session || runningRef.current) return
+        if (!terminal || !session) return
 
-        inputBufferRef.current = ""
-        terminal.write(command + "\r\n")
         runningRef.current = true
         streamedBytesRef.current = 0
         void executeBrowserBash(session, command, { truncateOutput: false }).then((result) => {
@@ -40,6 +38,15 @@ function useTerminal() {
             terminal.write("$ ")
         })
     }, [])
+
+    const runCommand = useCallback((command: string) => {
+        const terminal = terminalRef.current
+        if (!terminal || runningRef.current) return
+
+        inputBufferRef.current = ""
+        terminal.write(command + "\r\n")
+        executeCommand(command)
+    }, [executeCommand])
 
     const handleData = useCallback((data: string) => {
         const terminal = terminalRef.current
@@ -83,23 +90,7 @@ function useTerminal() {
                     continue
                 }
 
-                runningRef.current = true
-                streamedBytesRef.current = 0
-                void executeBrowserBash(session, command, { truncateOutput: false }).then((result) => {
-                    const remaining = result.stdout?.slice(streamedBytesRef.current)
-                    if (remaining) {
-                        terminal.write(remaining)
-                    }
-                    if (result.stderr) {
-                        terminal.write(result.stderr)
-                    }
-                }).catch((err: unknown) => {
-                    const message = err instanceof Error ? err.message : "Command failed"
-                    terminal.write(`\x1b[31m${message}\x1b[0m\r\n`)
-                }).finally(() => {
-                    runningRef.current = false
-                    terminal.write("$ ")
-                })
+                executeCommand(command)
                 continue
             }
 
@@ -109,7 +100,7 @@ function useTerminal() {
             inputBufferRef.current += char
             terminal.write(char)
         }
-    }, [])
+    }, [executeCommand])
 
     useEffect(() => {
         const container = containerRef.current

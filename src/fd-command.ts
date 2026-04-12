@@ -201,9 +201,20 @@ function escapeRegex(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
-/** Simple gitignore-style pattern matching */
-function parseIgnorePatterns(content: string): ((relPath: string, isDir: boolean) => boolean)[] {
-    const matchers: ((relPath: string, isDir: boolean) => boolean)[] = []
+type IgnoreMatcher = (relPath: string, isDir: boolean) => boolean
+
+async function loadIgnoreFile(
+    fs: { readFile(path: string): Promise<string> },
+    filePath: string,
+): Promise<IgnoreMatcher[]> {
+    let content: string
+    try {
+        content = await fs.readFile(filePath)
+    } catch {
+        return []
+    }
+
+    const matchers: IgnoreMatcher[] = []
     for (const raw of content.split("\n")) {
         const line = raw.trim()
         if (!line || line.startsWith("#")) continue
@@ -224,26 +235,8 @@ function parseIgnorePatterns(content: string): ((relPath: string, isDir: boolean
     return matchers
 }
 
-type IgnoreMatcher = (relPath: string, isDir: boolean) => boolean
-
-async function loadIgnoreFile(
-    fs: { readFile(path: string): Promise<string> },
-    filePath: string,
-): Promise<IgnoreMatcher[]> {
-    try {
-        const content = await fs.readFile(filePath)
-        return parseIgnorePatterns(content)
-    } catch {
-        return []
-    }
-}
-
 function resolvePath(base: string, rel: string): string {
-    if (rel.startsWith("/")) return normalizePath(rel)
-    return normalizePath(`${base}/${rel}`)
-}
-
-function normalizePath(p: string): string {
+    const p = rel.startsWith("/") ? rel : `${base}/${rel}`
     const parts = p.split("/").filter(Boolean)
     const result: string[] = []
     for (const part of parts) {
@@ -315,15 +308,8 @@ export async function executeFd(args: string[], ctx: CommandContext): Promise<Ex
     // Build exclude matchers
     const excludeMatchers = opts.excludes.map(p => globToRegex(p))
 
-    // Load ignore files (gitignore patterns)
+    // Load additional ignore files
     const ignoreMatchers: IgnoreMatcher[] = []
-    if (!opts.noIgnore) {
-        for (const root of searchRoots) {
-            const gitignorePath = `${root}/.gitignore`
-            const loaded = await loadIgnoreFile(fs, gitignorePath)
-            ignoreMatchers.push(...loaded)
-        }
-    }
     for (const ignoreFile of opts.ignoreFiles) {
         const absPath = resolvePath(cwd, ignoreFile)
         const loaded = await loadIgnoreFile(fs, absPath)
@@ -426,10 +412,7 @@ export async function executeFd(args: string[], ctx: CommandContext): Promise<Ex
         if (!opts.noIgnore) {
             const rootGitignore = `${root}/.gitignore`
             const loaded = await loadIgnoreFile(fs, rootGitignore)
-            // Avoid duplicates by only pushing newly loaded matchers
-            if (loaded.length > 0) {
-                ignoreMatchers.push(...loaded)
-            }
+            ignoreMatchers.push(...loaded)
         }
 
         await walk(root, root, 1)

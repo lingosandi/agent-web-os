@@ -128,14 +128,20 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
     }
 }
 
-/** Execute a bash command in a session with timeout handling */
-async function execBashWithTimeout(
+/** Execute a bash command and return a ToolResult */
+export async function executeBrowserBash(
     session: BrowserBashSession,
     command: string,
-    options: { timeoutMs?: number; signal?: AbortSignal; env?: Record<string, string> } = {},
-): Promise<{ stdout: string; stderr: string; exitCode: number; env?: Record<string, string | undefined> }> {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_BASH_COMMAND_TIMEOUT_MS
-    const env = options.env ?? { ...DEFAULT_BASH_SHELL_ENV }
+    options: ExecuteBrowserBashOptions = {},
+): Promise<ToolResult> {
+    const trimmedCommand = command.trim()
+    if (!trimmedCommand) {
+        return { success: false, error: "Command is required", stderr: "Command is required", exit_code: 1, command: trimmedCommand, backend: "just-bash" }
+    }
+
+    const startedAt = Date.now()
+    const outputLimit = options.outputLimit ?? DEFAULT_BASH_OUTPUT_LIMIT
+    const timeoutMs = options.commandTimeoutMs ?? DEFAULT_BASH_COMMAND_TIMEOUT_MS
 
     const timeoutController = new AbortController()
     const combinedController = new AbortController()
@@ -157,10 +163,10 @@ async function execBashWithTimeout(
     }, timeoutMs)
 
     try {
-        const result = await session.bash.exec(command, {
+        const result = await session.bash.exec(trimmedCommand, {
             cwd: session.cwd,
             env: {
-                ...env,
+                ...DEFAULT_BASH_SHELL_ENV,
                 PWD: session.cwd,
             },
             signal: combinedController.signal,
@@ -171,31 +177,6 @@ async function execBashWithTimeout(
             session.cwd = normalizeBashPath(nextCwd)
         }
 
-        return result
-    } finally {
-        globalThis.clearTimeout(timeoutId)
-    }
-}
-
-/** Execute a bash command and return a ToolResult */
-export async function executeBrowserBash(
-    session: BrowserBashSession,
-    command: string,
-    options: ExecuteBrowserBashOptions = {},
-): Promise<ToolResult> {
-    const trimmedCommand = command.trim()
-    if (!trimmedCommand) {
-        return { success: false, error: "Command is required", stderr: "Command is required", exit_code: 1, command: trimmedCommand, backend: "just-bash" }
-    }
-
-    const startedAt = Date.now()
-    const outputLimit = options.outputLimit ?? DEFAULT_BASH_OUTPUT_LIMIT
-
-    try {
-        const result = await execBashWithTimeout(session, trimmedCommand, {
-            timeoutMs: options.commandTimeoutMs,
-            signal: options.signal,
-        })
         const stdout = options.truncateOutput === false ? result.stdout : truncateBashOutput(result.stdout, outputLimit)
         const stderr = options.truncateOutput === false ? result.stderr : truncateBashOutput(result.stderr, outputLimit)
         const error = result.exitCode === 0 ? undefined : stderr || undefined
@@ -214,5 +195,7 @@ export async function executeBrowserBash(
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return { success: false, command: trimmedCommand, error: message, stderr: message, exit_code: 1, duration_ms: Date.now() - startedAt, backend: "just-bash" }
+    } finally {
+        globalThis.clearTimeout(timeoutId)
     }
 }
