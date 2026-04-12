@@ -258,7 +258,10 @@ export default function App() {
                 <div className="header-meta">
                     <div>AGENT-WEB-OS // V.0.1.2</div>
                     <div>STATUS: KERNEL_READY</div>
-                    <div>NPM: agent-web-os</div>
+                    <div className="header-links">
+                        <a href="https://github.com/nicoshl/agent-web-os" target="_blank" rel="noopener noreferrer" className="header-btn">GitHub</a>
+                        <a href="https://www.npmjs.com/package/agent-web-os" target="_blank" rel="noopener noreferrer" className="header-btn">npm</a>
+                    </div>
                 </div>
 
                 <section className="hero-section">

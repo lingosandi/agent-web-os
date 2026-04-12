@@ -44,11 +44,33 @@ main {
 .header-meta {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     font-family: var(--mono);
     font-size: 10px;
     text-transform: uppercase;
     padding-bottom: 2rem;
     border-bottom: 1px solid var(--fg);
+}
+
+.header-links {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.header-btn {
+    color: var(--bg);
+    background: var(--fg);
+    text-decoration: none;
+    padding: 0.35rem 0.75rem;
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    transition: opacity 0.15s;
+}
+
+.header-btn:hover {
+    opacity: 0.8;
 }
 
 .hero-section {
