@@ -337,8 +337,5 @@ footer {
 @media (max-width: 1024px) {
     .terminal-container { flex-direction: column; }
     .hero-title { font-size: 25vw; }
-    .data-grid { grid-template-columns: repeat(3, 1fr); }
-    .docs-grid { grid-template-columns: 1fr; }
-    .grid-item { border-right: 1px solid var(--fg); border-bottom: none; }
     .grid-value { font-size: 2rem; }
 }

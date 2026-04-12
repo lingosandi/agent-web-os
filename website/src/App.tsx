@@ -53,11 +53,11 @@ function useTerminal() {
     const runningRef = useRef(false)
     const streamedBytesRef = useRef(0)
 
-    const executeCommand = useCallback((command: string): Promise<void> => {
+    const executeCommand = useCallback((command: string): Promise<boolean> => {
         const terminal = terminalRef.current
         const session = sessionRef.current
         const executeBrowserBash = executeBashRef.current
-        if (!terminal || !session || !executeBrowserBash) return Promise.resolve()
+        if (!terminal || !session || !executeBrowserBash) return Promise.resolve(false)
 
         runningRef.current = true
         streamedBytesRef.current = 0
@@ -69,18 +69,20 @@ function useTerminal() {
             if (result.stderr) {
                 terminal.write(result.stderr)
             }
+            return result.success === true
         }).catch((err: unknown) => {
             const message = err instanceof Error ? err.message : "Command failed"
             terminal.write(`\x1b[31m${message}\x1b[0m\r\n`)
+            return false
         }).finally(() => {
             runningRef.current = false
             terminal.write("$ ")
         })
     }, [])
 
-    const runCommand = useCallback((command: string): Promise<void> => {
+    const runCommand = useCallback((command: string): Promise<boolean> => {
         const terminal = terminalRef.current
-        if (!terminal || runningRef.current) return Promise.resolve()
+        if (!terminal || runningRef.current) return Promise.resolve(false)
 
         inputBufferRef.current = ""
         terminal.write(command + "\r\n")
@@ -236,20 +238,6 @@ export default function App() {
     const [installed, setInstalled] = useState(false)
     const [startingPi, setStartingPi] = useState(false)
 
-    const handleInstall = useCallback(() => {
-        setInstalling(true)
-        void runCommand("npm install -g @mariozechner/pi-coding-agent").then(() => {
-            setInstalled(true)
-        })
-    }, [runCommand])
-
-    const handleStartPi = useCallback(() => {
-        setStartingPi(true)
-        void runCommand("pi").finally(() => {
-            setStartingPi(false)
-        })
-    }, [runCommand])
-
     return (
         <>
             <div className="frame" />
@@ -298,14 +286,28 @@ export default function App() {
                         <button
                             className="install-btn"
                             disabled={installing || installed}
-                            onClick={handleInstall}
+                            onClick={() => {
+                                setInstalling(true)
+                                void runCommand("npm install -g @mariozechner/pi-coding-agent").then((success) => {
+                                    if (success) {
+                                        setInstalled(true)
+                                    } else {
+                                        setInstalling(false)
+                                    }
+                                })
+                            }}
                         >
                             ▶ npm install -g @mariozechner/pi-coding-agent
                         </button>
                         <button
                             className="install-btn"
                             disabled={!installed || startingPi}
-                            onClick={handleStartPi}
+                            onClick={() => {
+                                setStartingPi(true)
+                                void runCommand("pi").finally(() => {
+                                    setStartingPi(false)
+                                })
+                            }}
                         >
                             ▶ start pi-coding-agent
                         </button>
