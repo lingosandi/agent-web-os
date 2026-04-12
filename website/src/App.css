@@ -83,6 +83,30 @@ main {
     margin-top: auto;
 }
 
+.terminal-actions {
+    padding: 0.75rem 2rem;
+    background: #000;
+    border-bottom: 1px solid #222;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.install-btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 0.5rem 1rem;
+    background: transparent;
+    color: #00FF41;
+    border: 1px solid #00FF41;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.install-btn:hover {
+    background: #00FF41;
+    color: #000;
+}
+
 .terminal-core {
     padding: 2rem;
     display: flex;

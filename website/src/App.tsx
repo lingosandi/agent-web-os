@@ -15,6 +15,32 @@ function useTerminal() {
     const runningRef = useRef(false)
     const streamedBytesRef = useRef(0)
 
+    const runCommand = useCallback((command: string) => {
+        const terminal = terminalRef.current
+        const session = sessionRef.current
+        if (!terminal || !session || runningRef.current) return
+
+        inputBufferRef.current = ""
+        terminal.write(command + "\r\n")
+        runningRef.current = true
+        streamedBytesRef.current = 0
+        void executeBrowserBash(session, command, { truncateOutput: false }).then((result) => {
+            const remaining = result.stdout?.slice(streamedBytesRef.current)
+            if (remaining) {
+                terminal.write(remaining.replace(/\n/g, "\r\n"))
+            }
+            if (result.stderr) {
+                terminal.write(result.stderr.replace(/\n/g, "\r\n"))
+            }
+        }).catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : "Command failed"
+            terminal.write(`\x1b[31m${message}\x1b[0m\r\n`)
+        }).finally(() => {
+            runningRef.current = false
+            terminal.write("$ ")
+        })
+    }, [])
+
     const handleData = useCallback((data: string) => {
         const terminal = terminalRef.current
         const session = sessionRef.current
@@ -150,11 +176,11 @@ function useTerminal() {
         }
     }, [handleData])
 
-    return containerRef
+    return { containerRef, runCommand }
 }
 
 export default function App() {
-    const terminalContainerRef = useTerminal()
+    const { containerRef: terminalContainerRef, runCommand } = useTerminal()
 
     return (
         <>
@@ -197,6 +223,14 @@ export default function App() {
                 </section>
 
                 <section className="terminal-container">
+                    <div className="terminal-actions">
+                        <button
+                            className="install-btn"
+                            onClick={() => runCommand("npm install -g @mariozechner/pi-coding-agent")}
+                        >
+                            ▶ npm install -g @mariozechner/pi-coding-agent
+                        </button>
+                    </div>
                     <div className="terminal-core">
                         <div className="terminal-header">
                             <span>bash-5.1$ session_01</span>
