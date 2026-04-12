@@ -88,6 +88,7 @@ main {
     background: #000;
     border-bottom: 1px solid #222;
     display: flex;
+    flex-direction: column;
     gap: 0.5rem;
 }
 
@@ -105,6 +106,17 @@ main {
 .install-btn:hover {
     background: #00FF41;
     color: #000;
+}
+
+.install-btn:disabled {
+    color: #444;
+    border-color: #444;
+    cursor: not-allowed;
+}
+
+.install-btn:disabled:hover {
+    background: transparent;
+    color: #444;
 }
 
 .terminal-core {
@@ -138,6 +150,106 @@ main {
     grid-template-columns: repeat(3, 1fr);
     border-top: 1px solid var(--fg);
     border-bottom: 1px solid var(--fg);
+}
+
+.docs-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2rem;
+    padding: 3rem 0 1rem;
+}
+
+.docs-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+    max-width: 760px;
+}
+
+.docs-kicker,
+.docs-card-kicker,
+.docs-card-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+}
+
+.docs-title {
+    font-family: var(--sans);
+    font-size: clamp(2rem, 3vw, 2.75rem);
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.docs-copy,
+.docs-card-copy {
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+}
+
+.docs-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+    width: 100%;
+    max-width: 960px;
+}
+
+.docs-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    min-width: 0;
+    padding: 1.5rem;
+    border: 1px solid #d5d5d5;
+    background: #ffffff;
+}
+
+.docs-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid #e5e5e5;
+}
+
+.docs-card-kicker {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+}
+
+.docs-card-meta {
+    color: #666;
+}
+
+.docs-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.docs-block-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #555;
+}
+
+.docs-code {
+    min-width: 0;
+    overflow-x: auto;
+    padding: 1rem;
+    border: 1px solid #e2e2e2;
+    background: #f7f7f7;
+    color: #111;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre;
 }
 
 .grid-item {
@@ -204,6 +316,7 @@ footer {
     .terminal-container { flex-direction: column; }
     .hero-title { font-size: 25vw; }
     .data-grid { grid-template-columns: repeat(3, 1fr); }
+    .docs-grid { grid-template-columns: 1fr; }
     .grid-item { border-right: 1px solid var(--fg); border-bottom: none; }
     .grid-value { font-size: 2rem; }
 }

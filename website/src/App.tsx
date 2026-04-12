@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useCallback, useState } from "react"
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import "@xterm/xterm/css/xterm.css"
@@ -6,6 +6,45 @@ import { createBrowserBashSession, executeBrowserBash, type BrowserBashSession }
 import "./App.css"
 
 const DOTS = Array.from({ length: 10 })
+const AGENT_WEB_OS_INSTALL_SNIPPET = String.raw`npm install agent-web-os
+bun add agent-web-os
+pnpm add agent-web-os
+yarn add agent-web-os`
+
+const XTERM_INSTALL_SNIPPET = String.raw`npm install @xterm/xterm @xterm/addon-fit
+bun add @xterm/xterm @xterm/addon-fit
+pnpm add @xterm/xterm @xterm/addon-fit
+yarn add @xterm/xterm @xterm/addon-fit`
+
+const VITE_SETUP_SNIPPET = String.raw`import { createBrowserBashSession, executeBrowserBash } from "agent-web-os"
+
+const session = createBrowserBashSession({ rootPath: "/workspace" })
+
+export async function runAgentWebOsDemo() {
+    const result = await executeBrowserBash(session, "node --version")
+    console.log(result.stdout)
+}`
+
+const XTERM_HOOK_SNIPPET = String.raw`import { Terminal } from "@xterm/xterm"
+import { FitAddon } from "@xterm/addon-fit"
+import "@xterm/xterm/css/xterm.css"
+import { createBrowserBashSession, executeBrowserBash } from "agent-web-os"
+
+const session = createBrowserBashSession({ rootPath: "/workspace" })
+const terminal = new Terminal({ convertEol: true, cursorBlink: true })
+const fitAddon = new FitAddon()
+
+terminal.loadAddon(fitAddon)
+terminal.open(container)
+fitAddon.fit()
+
+void executeBrowserBash(session, "python --version")
+session.almostNodeSession.setStdoutWriter((data) => terminal.write(data))
+session.almostNodeSession.setTerminalSize(terminal.cols, terminal.rows)
+
+terminal.onData((data) => {
+    session.almostNodeSession.writeStdin(data)
+})`
 
 function useTerminal() {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -15,14 +54,14 @@ function useTerminal() {
     const runningRef = useRef(false)
     const streamedBytesRef = useRef(0)
 
-    const executeCommand = useCallback((command: string) => {
+    const executeCommand = useCallback((command: string): Promise<void> => {
         const terminal = terminalRef.current
         const session = sessionRef.current
-        if (!terminal || !session) return
+        if (!terminal || !session) return Promise.resolve()
 
         runningRef.current = true
         streamedBytesRef.current = 0
-        void executeBrowserBash(session, command, { truncateOutput: false }).then((result) => {
+        return executeBrowserBash(session, command, { truncateOutput: false }).then((result) => {
             const remaining = result.stdout?.slice(streamedBytesRef.current)
             if (remaining) {
                 terminal.write(remaining)
@@ -39,13 +78,13 @@ function useTerminal() {
         })
     }, [])
 
-    const runCommand = useCallback((command: string) => {
+    const runCommand = useCallback((command: string): Promise<void> => {
         const terminal = terminalRef.current
-        if (!terminal || runningRef.current) return
+        if (!terminal || runningRef.current) return Promise.resolve()
 
         inputBufferRef.current = ""
         terminal.write(command + "\r\n")
-        executeCommand(command)
+        return executeCommand(command)
     }, [executeCommand])
 
     const handleData = useCallback((data: string) => {
@@ -173,6 +212,23 @@ function useTerminal() {
 
 export default function App() {
     const { containerRef: terminalContainerRef, runCommand } = useTerminal()
+    const [installing, setInstalling] = useState(false)
+    const [installed, setInstalled] = useState(false)
+    const [startingPi, setStartingPi] = useState(false)
+
+    const handleInstall = useCallback(() => {
+        setInstalling(true)
+        void runCommand("npm install -g @mariozechner/pi-coding-agent").then(() => {
+            setInstalled(true)
+        })
+    }, [runCommand])
+
+    const handleStartPi = useCallback(() => {
+        setStartingPi(true)
+        void runCommand("pi").finally(() => {
+            setStartingPi(false)
+        })
+    }, [runCommand])
 
     return (
         <>
@@ -218,9 +274,17 @@ export default function App() {
                     <div className="terminal-actions">
                         <button
                             className="install-btn"
-                            onClick={() => runCommand("npm install -g @mariozechner/pi-coding-agent")}
+                            disabled={installing || installed}
+                            onClick={handleInstall}
                         >
                             ▶ npm install -g @mariozechner/pi-coding-agent
+                        </button>
+                        <button
+                            className="install-btn"
+                            disabled={!installed || startingPi}
+                            onClick={handleStartPi}
+                        >
+                            ▶ start pi-coding-agent
                         </button>
                     </div>
                     <div className="terminal-core">
@@ -237,6 +301,55 @@ export default function App() {
                         COMPUTATION BEYOND BORDERS // PYTHON IN BROWSER // NODE.JS WASM // BASH EMULATION // VIRTUAL FILE SYSTEM // AGENT WEB OS // COMPUTATION BEYOND BORDERS // PYTHON IN BROWSER // NODE.JS WASM // BASH EMULATION // VIRTUAL FILE SYSTEM // AGENT WEB OS //
                     </div>
                 </div>
+
+                <section className="docs-section">
+                    <div className="docs-header">
+                        <div className="docs-kicker">Integration Notes</div>
+                        <h2 className="docs-title">Ship agent-web-os in your app</h2>
+                        <p className="docs-copy">
+                            Start by installing the runtime package, then create a browser-only session in your app.
+                            If you want a terminal UI, install xterm separately and wire it into the session stdin and stdout streams.
+                        </p>
+                    </div>
+
+                    <div className="docs-grid">
+                        <article className="docs-card">
+                            <div className="docs-card-header">
+                                <span className="docs-card-kicker">Vite</span>
+                                <span className="docs-card-meta">Client bundle</span>
+                            </div>
+                            <p className="docs-card-copy">
+                                Install `agent-web-os`, create a session in the browser, and execute commands from your component or hook.
+                            </p>
+                            <div className="docs-block">
+                                <div className="docs-block-label">Install</div>
+                                <pre className="docs-code"><code>{AGENT_WEB_OS_INSTALL_SNIPPET}</code></pre>
+                            </div>
+                            <div className="docs-block">
+                                <div className="docs-block-label">Example</div>
+                            <pre className="docs-code"><code>{VITE_SETUP_SNIPPET}</code></pre>
+                            </div>
+                        </article>
+
+                        <article className="docs-card">
+                            <div className="docs-card-header">
+                                <span className="docs-card-kicker">xterm</span>
+                                <span className="docs-card-meta">Attach terminal IO</span>
+                            </div>
+                            <p className="docs-card-copy">
+                                Install xterm separately, attach it to your DOM node, mirror stdout into the terminal, and send keystrokes into `writeStdin` for interactive tools.
+                            </p>
+                            <div className="docs-block">
+                                <div className="docs-block-label">Install</div>
+                                <pre className="docs-code"><code>{XTERM_INSTALL_SNIPPET}</code></pre>
+                            </div>
+                            <div className="docs-block">
+                                <div className="docs-block-label">Example</div>
+                                <pre className="docs-code"><code>{XTERM_HOOK_SNIPPET}</code></pre>
+                            </div>
+                        </article>
+                    </div>
+                </section>
 
                 <footer>
                     <div>OPEN SOURCE // MIT LICENSE</div>
