@@ -184,7 +184,7 @@ function useTerminal() {
             return true
         })
 
-        terminal.write("Welcome to Agent Web OS (WASM/X86_64)\r\n")
+        terminal.write("Welcome to Agent Web OS\r\n")
         terminal.write("Sandbox initialized. Node.js + Python available.\r\n")
         terminal.write("Type 'help' for available commands.\r\n\r\n")
         terminal.write("$ ")
@@ -258,11 +258,11 @@ export default function App() {
                 <section className="data-grid">
                     <div className="grid-item">
                         <span className="grid-label">Runtime Engine</span>
-                        <span className="grid-value">WASM-32</span>
+                        <span className="grid-value">WASM</span>
                     </div>
                     <div className="grid-item">
                         <span className="grid-label">Shell</span>
-                        <span className="grid-value">BASH-5.1</span>
+                        <span className="grid-value">BASH</span>
                     </div>
                     <div className="grid-item">
                         <span className="grid-label">Filesystem</span>
@@ -289,7 +289,7 @@ export default function App() {
                     </div>
                     <div className="terminal-core">
                         <div className="terminal-header">
-                            <span>bash-5.1$ session_01</span>
+                            <span>bash$ session_01</span>
                             <span>agent-web-os live demo</span>
                         </div>
                         <div className="terminal-xterm" ref={terminalContainerRef} />
