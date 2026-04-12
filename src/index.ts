@@ -1,4 +1,4 @@
-export const AGENT_WEB_OS_VERSION = "0.1.14"
+export const AGENT_WEB_OS_VERSION = "0.1.16"
 console.log(`[agent-web-os] v${AGENT_WEB_OS_VERSION}`)
 
 export {
@@ -21,6 +21,8 @@ export {
     DEFAULT_BASH_SHELL_ENV,
     type BrowserBashSession,
 } from "./browser-bash-session"
+
+export { executeFd } from "./fd-command"
 
 export type { ToolResult } from "./types"
 

@@ -9,12 +9,14 @@ import {
     AlmostNodeSession,
     createAlmostNodeSession,
 } from "./almostnode-session"
+import { executeFd } from "./fd-command"
 
 export const DEFAULT_BASH_SHELL_ENV = {
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
     PYTHONIOENCODING: "utf-8",
     PYTHONUTF8: "1",
+    PI_OFFLINE: "1",
 } as const
 
 const DEFAULT_BASH_COMMAND_TIMEOUT_MS = 5 * 60 * 1000
@@ -86,6 +88,16 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
     const fs = new ObservableInMemoryFs(options.fsOptions)
     fs.mkdirSync(rootPath, { recursive: true })
 
+    // Pre-create tool shim files at the paths pi-coding-agent expects
+    // (almostnode's os.homedir() returns "/home/user")
+    // This makes getToolPath() find the tools via existsSync() so no
+    // download is attempted. The grep tool's spawn() then goes through
+    // just-bash which has a built-in rg implementation.
+    const piBinDir = "/home/user/.pi/agent/bin"
+    fs.mkdirSync(piBinDir, { recursive: true })
+    fs.writeFileSync(`${piBinDir}/rg`, "#!/bin/sh\nrg \"$@\"\n")
+    fs.writeFileSync(`${piBinDir}/fd`, "#!/bin/sh\nfd \"$@\"\n")
+
     const almostNodeSession = createAlmostNodeSession(fs)
 
     const bash = new Bash({
@@ -95,6 +107,7 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
         customCommands: [
             defineCommand("node", async (args, ctx) => almostNodeSession.executeNode(args, ctx)),
             defineCommand("npm", async (args, ctx) => almostNodeSession.executeNpm(args, ctx)),
+            defineCommand("fd", async (args, ctx) => executeFd(args, ctx)),
             ...(options.customCommands ?? []),
         ],
     })
