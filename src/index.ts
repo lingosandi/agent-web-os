@@ -1,3 +1,6 @@
+export const AGENT_WEB_OS_VERSION = "0.1.10"
+console.log(`[agent-web-os] v${AGENT_WEB_OS_VERSION}`)
+
 export {
     ObservableInMemoryFs,
     assertObservableInMemoryFs,

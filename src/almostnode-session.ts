@@ -445,6 +445,7 @@ export class AlmostNodeSession {
     private registeredBinCommands = new Set<string>()
     private binCommandRegistrar?: BinCommandRegistrar
     private batchFileLoader?: BatchFileLoader
+    private stdoutWriter?: (data: string) => void
     private viteServer?: ViteDevServer
     private vitePort: number | null = null
     private vitePreviewUrl: string | null = null
@@ -454,6 +455,115 @@ export class AlmostNodeSession {
 
     constructor(private readonly fs: ObservableInMemoryFs) {
         this._vfs.mkdirSync(ALMOSTNODE_INTERNAL_ROOT, { recursive: true })
+
+        // Shim the deprecated `constants` module (missing from almostnode's builtins).
+        // Many npm packages still `require('constants')`.
+        this._vfs.mkdirSync("/node_modules/constants", { recursive: true })
+        this._vfs.writeFileSync("/node_modules/constants/package.json", JSON.stringify({
+            name: "constants",
+            version: "0.0.1",
+            main: "index.js",
+        }))
+        this._vfs.writeFileSync("/node_modules/constants/index.js", [
+            "// Node.js `constants` shim (os.constants + fs.constants)",
+            "var os = require('os');",
+            "var constants = {};",
+            "if (os.constants) {",
+            "  if (os.constants.signals) Object.assign(constants, os.constants.signals);",
+            "  if (os.constants.errno) Object.assign(constants, os.constants.errno);",
+            "  if (os.constants.priority) Object.assign(constants, os.constants.priority);",
+            "}",
+            "// Common fs.constants used by npm packages",
+            "constants.O_RDONLY = 0;",
+            "constants.O_WRONLY = 1;",
+            "constants.O_RDWR = 2;",
+            "constants.O_CREAT = 64;",
+            "constants.O_EXCL = 128;",
+            "constants.O_TRUNC = 512;",
+            "constants.O_APPEND = 1024;",
+            "constants.O_DIRECTORY = 65536;",
+            "constants.O_NOFOLLOW = 131072;",
+            "constants.O_SYNC = 1052672;",
+            "constants.O_SYMLINK = 2097152;",
+            "constants.O_NONBLOCK = 2048;",
+            "constants.S_IFMT = 61440;",
+            "constants.S_IFREG = 32768;",
+            "constants.S_IFDIR = 16384;",
+            "constants.S_IFCHR = 8192;",
+            "constants.S_IFBLK = 24576;",
+            "constants.S_IFIFO = 4096;",
+            "constants.S_IFLNK = 40960;",
+            "constants.S_IFSOCK = 49152;",
+            "constants.S_IRWXU = 448;",
+            "constants.S_IRUSR = 256;",
+            "constants.S_IWUSR = 128;",
+            "constants.S_IXUSR = 64;",
+            "constants.S_IRWXG = 56;",
+            "constants.S_IRGRP = 32;",
+            "constants.S_IWGRP = 16;",
+            "constants.S_IXGRP = 8;",
+            "constants.S_IRWXO = 7;",
+            "constants.S_IROTH = 4;",
+            "constants.S_IWOTH = 2;",
+            "constants.S_IXOTH = 1;",
+            "constants.F_OK = 0;",
+            "constants.R_OK = 4;",
+            "constants.W_OK = 2;",
+            "constants.X_OK = 1;",
+            "constants.COPYFILE_EXCL = 1;",
+            "constants.COPYFILE_FICLONE = 2;",
+            "constants.COPYFILE_FICLONE_FORCE = 4;",
+            "constants.UV_FS_COPYFILE_EXCL = 1;",
+            "constants.UV_FS_COPYFILE_FICLONE = 2;",
+            "constants.UV_FS_COPYFILE_FICLONE_FORCE = 4;",
+            "module.exports = constants;",
+        ].join("\n"))
+
+        // Shim `stream/promises` subpath (missing from almostnode's builtins).
+        // The stream module has .promises but it's not registered as a subpath.
+        this._vfs.mkdirSync("/node_modules/stream", { recursive: true })
+        this._vfs.writeFileSync("/node_modules/stream/package.json", JSON.stringify({
+            name: "stream",
+            version: "0.0.1",
+            main: "index.js",
+        }))
+        this._vfs.writeFileSync("/node_modules/stream/index.js",
+            "module.exports = require('stream');")
+        this._vfs.mkdirSync("/node_modules/stream/promises", { recursive: true })
+        this._vfs.writeFileSync("/node_modules/stream/promises/package.json", JSON.stringify({
+            name: "stream-promises",
+            version: "0.0.1",
+            main: "index.js",
+        }))
+        this._vfs.writeFileSync("/node_modules/stream/promises/index.js",
+            "var stream = require('stream');\nmodule.exports = stream.promises || {};")
+
+        // Shim `stream/web` subpath (missing from almostnode's builtins).
+        // Re-exports the browser-native Web Streams API (ReadableStream, WritableStream, etc.)
+        this._vfs.mkdirSync("/node_modules/stream/web", { recursive: true })
+        this._vfs.writeFileSync("/node_modules/stream/web/package.json", JSON.stringify({
+            name: "stream-web",
+            version: "0.0.1",
+            main: "index.js",
+        }))
+        this._vfs.writeFileSync("/node_modules/stream/web/index.js", [
+            "// Web Streams API shim — re-exports browser globals",
+            "module.exports = {",
+            "  ReadableStream: typeof ReadableStream !== 'undefined' ? ReadableStream : undefined,",
+            "  ReadableStreamDefaultReader: typeof ReadableStreamDefaultReader !== 'undefined' ? ReadableStreamDefaultReader : undefined,",
+            "  ReadableStreamBYOBReader: typeof ReadableStreamBYOBReader !== 'undefined' ? ReadableStreamBYOBReader : undefined,",
+            "  ReadableStreamDefaultController: typeof ReadableStreamDefaultController !== 'undefined' ? ReadableStreamDefaultController : undefined,",
+            "  ReadableByteStreamController: typeof ReadableByteStreamController !== 'undefined' ? ReadableByteStreamController : undefined,",
+            "  WritableStream: typeof WritableStream !== 'undefined' ? WritableStream : undefined,",
+            "  WritableStreamDefaultWriter: typeof WritableStreamDefaultWriter !== 'undefined' ? WritableStreamDefaultWriter : undefined,",
+            "  WritableStreamDefaultController: typeof WritableStreamDefaultController !== 'undefined' ? WritableStreamDefaultController : undefined,",
+            "  TransformStream: typeof TransformStream !== 'undefined' ? TransformStream : undefined,",
+            "  TransformStreamDefaultController: typeof TransformStreamDefaultController !== 'undefined' ? TransformStreamDefaultController : undefined,",
+            "  ByteLengthQueuingStrategy: typeof ByteLengthQueuingStrategy !== 'undefined' ? ByteLengthQueuingStrategy : undefined,",
+            "  CountQueuingStrategy: typeof CountQueuingStrategy !== 'undefined' ? CountQueuingStrategy : undefined,",
+            "};",
+        ].join("\n"))
+
         this.disposeObservableSubscription = this.fs.subscribe((event) => {
             void this.trackOperation((async () => {
                 if (!this.initialized || this.suppressObservableMirrorCount > 0) {
@@ -488,6 +598,10 @@ export class AlmostNodeSession {
 
     setBatchFileLoader(loader: BatchFileLoader): void {
         this.batchFileLoader = loader
+    }
+
+    setStdoutWriter(writer: ((data: string) => void) | undefined): void {
+        this.stdoutWriter = writer
     }
 
     setVitePreviewListener(listener: VitePreviewListener | undefined): void {
@@ -1000,6 +1114,64 @@ export class AlmostNodeSession {
         } catch { /* ignore */ }
 
         return null
+    }
+
+    /**
+     * Patch lru-cache installations so the CJS entry doesn't crash in
+     * the browser runtime.  lru-cache v11's CJS unconditionally calls
+     * `require("node:diagnostics_channel").tracingChannel()` at the
+     * module scope.  If that throws inside the browser WASM sandbox the
+     * entire module fails and `exports.LRUCache` is never assigned,
+     * leading to "TypeError: LRUCache is not a constructor".
+     *
+     * The fix: wrap the `require("node:diagnostics_channel")` call in a
+     * try/catch with a no-op fallback so LRUCache initialises safely.
+     */
+    private patchLruCacheInNodeModules(nodeModulesDir: string): void {
+        const patchFile = (filePath: string) => {
+            if (!this._vfs.existsSync(filePath)) return
+            const src = this._vfs.readFileSync(filePath, "utf8") as string
+            if (!src.includes('require("node:diagnostics_channel")')) return
+            const patched = src.replace(
+                'require("node:diagnostics_channel")',
+                '(function(){try{var _dc=require("node:diagnostics_channel");var _ch=_dc.channel("lru-cache:_test");if(typeof _dc.tracingChannel==="function")_dc.tracingChannel("lru-cache:_test");return _dc}catch(_e){return{channel:function(){return{hasSubscribers:false,publish:function(){},subscribe:function(){},unsubscribe:function(){}}},tracingChannel:function(){return{hasSubscribers:false,subscribe:function(){},unsubscribe:function(){}}}}}})()',
+            )
+            if (patched !== src) {
+                this._vfs.writeFileSync(filePath, patched)
+            }
+        }
+
+        // Walk node_modules (one level of nesting + scoped packages)
+        const walkNodeModules = (nmDir: string) => {
+            if (!this._vfs.existsSync(nmDir)) return
+            for (const entry of this._vfs.readdirSync(nmDir)) {
+                if (entry === "lru-cache") {
+                    const cjsEntry = normalizePath(path.join(nmDir, "lru-cache", "dist", "commonjs", "index.min.js"))
+                    patchFile(cjsEntry)
+                    const cjsIndex = normalizePath(path.join(nmDir, "lru-cache", "dist", "commonjs", "index.js"))
+                    patchFile(cjsIndex)
+                }
+                // Check nested node_modules inside each package
+                const nestedNm = normalizePath(path.join(nmDir, entry, "node_modules"))
+                if (this._vfs.existsSync(nestedNm)) {
+                    walkNodeModules(nestedNm)
+                }
+                // Scoped packages (@scope/pkg)
+                if (entry.startsWith("@")) {
+                    const scopeDir = normalizePath(path.join(nmDir, entry))
+                    if (this._vfs.existsSync(scopeDir)) {
+                        for (const scopedEntry of this._vfs.readdirSync(scopeDir)) {
+                            const nestedNm2 = normalizePath(path.join(scopeDir, scopedEntry, "node_modules"))
+                            if (this._vfs.existsSync(nestedNm2)) {
+                                walkNodeModules(nestedNm2)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        walkNodeModules(nodeModulesDir)
     }
 
     private async registerGlobalBinCommands(packageName: string): Promise<void> {
@@ -1614,7 +1786,9 @@ export class AlmostNodeSession {
                             const installResult = await packageManager.install(packageSpec, {
                                 save: true,
                                 onProgress: (message) => {
-                                    stdout += `${message}\n`
+                                    const line = `${message}\n`
+                                    stdout += line
+                                    this.stdoutWriter?.(line)
                                 },
                             })
                             stdout += `added ${installResult.added.length} packages\n`
@@ -1632,6 +1806,9 @@ export class AlmostNodeSession {
                             }
                         }
 
+                        // Patch lru-cache to avoid diagnostics_channel crash in browser
+                        this.patchLruCacheInNodeModules(GLOBAL_NODE_MODULES_ROOT)
+
                         result = { stdout, stderr: "", exitCode: 0 }
                     } else {
                         const packageJsonResult = await this.readPackageJson(cwd)
@@ -1647,7 +1824,9 @@ export class AlmostNodeSession {
                         if (packageSpecs.length === 0) {
                             const installResult = await packageManager.installFromPackageJson({
                                 onProgress: (message) => {
-                                    stdout += `${message}\n`
+                                    const line = `${message}\n`
+                                    stdout += line
+                                    this.stdoutWriter?.(line)
                                 },
                             })
                             stdout += `added ${installResult.added.length} packages\n`
@@ -1656,12 +1835,18 @@ export class AlmostNodeSession {
                                 const installResult = await packageManager.install(packageSpec, {
                                     save: true,
                                     onProgress: (message) => {
-                                        stdout += `${message}\n`
+                                        const line = `${message}\n`
+                                        stdout += line
+                                        this.stdoutWriter?.(line)
                                     },
                                 })
                                 stdout += `added ${installResult.added.length} packages\n`
                             }
                         }
+
+                        // Patch lru-cache to avoid diagnostics_channel crash in browser
+                        const localNodeModules = normalizePath(path.join(cwd, "node_modules"))
+                        this.patchLruCacheInNodeModules(localNodeModules)
 
                         result = { stdout, stderr: "", exitCode: 0 }
                     }

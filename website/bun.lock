@@ -7,7 +7,7 @@
       "dependencies": {
         "@xterm/addon-fit": "^0.11.0",
         "@xterm/xterm": "^6.0.0",
-        "agent-web-os": "^0.1.4",
+        "agent-web-os": "^0.1.10",
         "react": "^19.2.4",
         "react-dom": "^19.2.4",
       },
@@ -264,7 +264,7 @@
 
     "acorn-jsx": ["acorn-jsx@5.3.2", "", { "peerDependencies": { "acorn": "^6.0.0 || ^7.0.0 || ^8.0.0" } }, "sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ=="],
 
-    "agent-web-os": ["agent-web-os@0.1.4", "", { "dependencies": { "almostnode": "^0.2.14", "just-bash": "^2.14.0" } }, "sha512-ooWbGMl8uCmiIMBoDD9WodZoWlGlQOreCv0W3qv93ltYIEE+GxlBoAx48Yij1eJB99mwq+37S2iOjSEfICJcfQ=="],
+    "agent-web-os": ["agent-web-os@0.1.10", "", { "dependencies": { "almostnode": "^0.2.14", "just-bash": "^2.14.0" } }, "sha512-fwayoJ40FYEjnXDBV0uoKPxJN08fJkRtEeIR6Tr9FYeRxf7PdcqtRhB1VbjwhYhDANnRM8m3U5ReX3jAEOl3EA=="],
 
     "ai": ["ai@6.0.158", "", { "dependencies": { "@ai-sdk/gateway": "3.0.95", "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.23", "@opentelemetry/api": "1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-gLTp1UXFtMqKUi3XHs33K7UFglbvojkxF/aq337TxnLGOhHIW9+GyP2jwW4hYX87f1es+wId3VQoPRRu9zEStQ=="],
 

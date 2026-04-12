@@ -13,6 +13,7 @@ function useTerminal() {
     const sessionRef = useRef<BrowserBashSession | null>(null)
     const inputBufferRef = useRef("")
     const runningRef = useRef(false)
+    const streamedBytesRef = useRef(0)
 
     const handleData = useCallback((data: string) => {
         const terminal = terminalRef.current
@@ -52,9 +53,11 @@ function useTerminal() {
                 }
 
                 runningRef.current = true
+                streamedBytesRef.current = 0
                 void executeBrowserBash(session, command, { truncateOutput: false }).then((result) => {
-                    if (result.stdout) {
-                        terminal.write(result.stdout.replace(/\n/g, "\r\n"))
+                    const remaining = result.stdout?.slice(streamedBytesRef.current)
+                    if (remaining) {
+                        terminal.write(remaining.replace(/\n/g, "\r\n"))
                     }
                     if (result.stderr) {
                         terminal.write(result.stderr.replace(/\n/g, "\r\n"))
@@ -70,7 +73,7 @@ function useTerminal() {
             }
 
             if (char === "\n") continue
-            if (/[\u200B\u200C\u200D\u2060\uFEFF]/.test(char)) continue
+            if (char === "\u200B" || char === "\u200C" || char === "\u200D" || char === "\u2060" || char === "\uFEFF") continue
 
             inputBufferRef.current += char
             terminal.write(char)
@@ -101,6 +104,11 @@ function useTerminal() {
         terminal.loadAddon(fitAddon)
         terminal.open(container)
         fitAddon.fit()
+
+        session.almostNodeSession.setStdoutWriter((data) => {
+            streamedBytesRef.current += data.length
+            terminal.write(data.replace(/\n/g, "\r\n"))
+        })
 
         terminal.attachCustomKeyEventHandler((event) => {
             if (event.type !== "keydown") return true
