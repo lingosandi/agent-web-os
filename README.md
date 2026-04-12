@@ -2,78 +2,65 @@
 
 **[English](./README.md)** | **[中文](./README.zh-CN.md)**
 
-Browser-based operating system for your agents. Bash + Node.js + Python runtime with an observable in-memory filesystem. Install NPM or PIP packages, run shell commands, execute Node.js scripts, and manage files entirely in the browser — no server required. Supports Claude Code, Codex CLI, and OpenCode.
+A browser-based operating system for AI agents. Full Bash shell, Node.js runtime, and Python 3.11 execution. Observable in-memory filesystem. No server required.
 
 ## Install
 
 ```bash
 npm install agent-web-os
+bun add agent-web-os
+pnpm add agent-web-os
+yarn add agent-web-os
 ```
 
-## Usage
+## Vite Integration
 
-### Bash Session
-
-Create a full bash session with a virtual filesystem, shell, and Node.js runtime:
+Install `agent-web-os`, create a session in the browser, and execute commands from your component or hook.
 
 ```ts
-import { createBrowserBashSession } from "agent-web-os"
+import { createBrowserBashSession, executeBrowserBash } from "agent-web-os"
 
-const session = createBrowserBashSession({
-  rootPath: "/workspace",
+const session = createBrowserBashSession({ rootPath: "/workspace" })
+
+export async function runAgentWebOsDemo() {
+    const result = await executeBrowserBash(session, "node --version")
+    console.log(result.stdout)
+}
+```
+
+## xterm Integration
+
+Install xterm separately, attach it to your DOM node, mirror stdout into the terminal, and send keystrokes into `writeStdin` for interactive tools.
+
+```bash
+npm install @xterm/xterm @xterm/addon-fit
+bun add @xterm/xterm @xterm/addon-fit
+pnpm add @xterm/xterm @xterm/addon-fit
+yarn add @xterm/xterm @xterm/addon-fit
+```
+
+```ts
+import { Terminal } from "@xterm/xterm"
+import { FitAddon } from "@xterm/addon-fit"
+import "@xterm/xterm/css/xterm.css"
+import { createBrowserBashSession, executeBrowserBash } from "agent-web-os"
+
+const session = createBrowserBashSession({ rootPath: "/workspace" })
+const terminal = new Terminal({ convertEol: true, cursorBlink: true })
+const fitAddon = new FitAddon()
+
+terminal.loadAddon(fitAddon)
+terminal.open(container)
+fitAddon.fit()
+
+void executeBrowserBash(session, "python --version")
+session.almostNodeSession.setStdoutWriter((data) => terminal.write(data))
+session.almostNodeSession.setTerminalSize(terminal.cols, terminal.rows)
+
+terminal.onData((data) => {
+    session.almostNodeSession.writeStdin(data)
 })
-
-// Run shell commands
-const result = await executeBrowserBash(session, "echo hello world")
-console.log(result.stdout) // "hello world\n"
-
-// Read/write files through the observable filesystem
-session.fs.writeFileSync("/workspace/index.js", 'console.log("hi")')
-await executeBrowserBash(session, "node index.js")
-
-// Clean up
-session.dispose()
 ```
-
-### Observable Filesystem
-
-A reactive in-memory filesystem that emits change events:
-
-```ts
-import { ObservableInMemoryFs } from "agent-web-os"
-
-const fs = new ObservableInMemoryFs()
-
-fs.subscribe((event) => {
-  console.log(event.event, event.path) // "add", "/hello.txt"
-})
-
-fs.writeFileSync("/hello.txt", "world")
-```
-
-### Node.js Runtime
-
-Run Node.js scripts and npm commands in the browser via [almostnode](https://www.npmjs.com/package/almostnode):
-
-```ts
-import { createAlmostNodeSession } from "agent-web-os"
-
-const nodeSession = createAlmostNodeSession(fs)
-// Provides node, npm install, npm run, and Vite dev server support
-```
-
-### Service Worker Bridge
-
-For HTTP server support within the browser, register the service worker:
-
-```ts
-import { getServerBridge } from "agent-web-os"
-
-const bridge = getServerBridge()
-await bridge.initServiceWorker()
-```
-
-Copy `node_modules/agent-web-os/dist/__sw__.js` to your public directory so the service worker can be registered.
 
 ## License
 

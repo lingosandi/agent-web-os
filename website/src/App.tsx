@@ -1,8 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from "react"
-import { Terminal } from "@xterm/xterm"
-import { FitAddon } from "@xterm/addon-fit"
-import "@xterm/xterm/css/xterm.css"
-import { createBrowserBashSession, executeBrowserBash, type BrowserBashSession } from "agent-web-os"
+import type { Terminal } from "@xterm/xterm"
+import type { BrowserBashSession } from "agent-web-os"
 import "./App.css"
 
 const DOTS = Array.from({ length: 10 })
@@ -50,6 +48,7 @@ function useTerminal() {
     const containerRef = useRef<HTMLDivElement>(null)
     const terminalRef = useRef<Terminal | null>(null)
     const sessionRef = useRef<BrowserBashSession | null>(null)
+    const executeBashRef = useRef<typeof import("agent-web-os")["executeBrowserBash"] | null>(null)
     const inputBufferRef = useRef("")
     const runningRef = useRef(false)
     const streamedBytesRef = useRef(0)
@@ -57,7 +56,8 @@ function useTerminal() {
     const executeCommand = useCallback((command: string): Promise<void> => {
         const terminal = terminalRef.current
         const session = sessionRef.current
-        if (!terminal || !session) return Promise.resolve()
+        const executeBrowserBash = executeBashRef.current
+        if (!terminal || !session || !executeBrowserBash) return Promise.resolve()
 
         runningRef.current = true
         streamedBytesRef.current = 0
@@ -145,65 +145,85 @@ function useTerminal() {
         const container = containerRef.current
         if (!container) return
 
-        const session = createBrowserBashSession({ rootPath: "/workspace" })
-        sessionRef.current = session
+        let disposed = false
+        let terminal: Terminal | null = null
+        let session: BrowserBashSession | null = null
+        let dataDisposable: { dispose(): void } | null = null
+        let observer: ResizeObserver | null = null
 
-        const terminal = new Terminal({
-            cursorBlink: true,
-            convertEol: true,
-            fontSize: 13,
-            fontFamily: "'IBM Plex Mono', 'JetBrains Mono', 'Fira Code', Menlo, monospace",
-            theme: {
-                background: "#000000",
-                foreground: "#ffffff",
-                cursor: "#00FF41",
-                selectionBackground: "rgba(0, 255, 65, 0.2)",
-            },
-            scrollback: 1000,
-        })
+        void (async () => {
+            const [agentWebOs, xterm, xtermFit] = await Promise.all([
+                import("agent-web-os"),
+                import("@xterm/xterm"),
+                import("@xterm/addon-fit"),
+                import("@xterm/xterm/css/xterm.css"),
+            ])
+            if (disposed) return
 
-        const fitAddon = new FitAddon()
-        terminal.loadAddon(fitAddon)
-        terminal.open(container)
-        fitAddon.fit()
+            executeBashRef.current = agentWebOs.executeBrowserBash
 
-        session.almostNodeSession.setStdoutWriter((data) => {
-            streamedBytesRef.current += data.length
-            terminal.write(data)
-        })
+            session = agentWebOs.createBrowserBashSession({ rootPath: "/workspace" })
+            sessionRef.current = session
 
-        session.almostNodeSession.setTerminalSize(terminal.cols, terminal.rows)
-        terminal.onResize(({ cols, rows }) => {
-            session.almostNodeSession.setTerminalSize(cols, rows)
-        })
+            terminal = new xterm.Terminal({
+                cursorBlink: true,
+                convertEol: true,
+                fontSize: 13,
+                fontFamily: "'IBM Plex Mono', 'JetBrains Mono', 'Fira Code', Menlo, monospace",
+                theme: {
+                    background: "#000000",
+                    foreground: "#ffffff",
+                    cursor: "#00FF41",
+                    selectionBackground: "rgba(0, 255, 65, 0.2)",
+                },
+                scrollback: 1000,
+            })
 
-        terminal.attachCustomKeyEventHandler((event) => {
-            if (event.type !== "keydown") return true
-            if (event.ctrlKey && event.key === "c" && terminal.hasSelection()) return false
-            if (event.ctrlKey && event.key === "v") return false
-            return true
-        })
+            const fitAddon = new xtermFit.FitAddon()
+            terminal.loadAddon(fitAddon)
+            terminal.open(container)
+            fitAddon.fit()
 
-        terminal.write("Welcome to Agent Web OS\r\n")
-        terminal.write("Sandbox initialized. Node.js + Python available.\r\n")
-        terminal.write("Type 'help' for available commands.\r\n\r\n")
-        terminal.write("$ ")
+            session.almostNodeSession.setStdoutWriter((data) => {
+                streamedBytesRef.current += data.length
+                terminal!.write(data)
+            })
 
-        terminalRef.current = terminal
-        const dataDisposable = terminal.onData(handleData)
+            session.almostNodeSession.setTerminalSize(terminal.cols, terminal.rows)
+            terminal.onResize(({ cols, rows }) => {
+                session!.almostNodeSession.setTerminalSize(cols, rows)
+            })
 
-        const observer = new ResizeObserver(() => {
-            try { fitAddon.fit() } catch { /* ignore */ }
-        })
-        observer.observe(container)
+            terminal.attachCustomKeyEventHandler((event) => {
+                if (event.type !== "keydown") return true
+                if (event.ctrlKey && event.key === "c" && terminal!.hasSelection()) return false
+                if (event.ctrlKey && event.key === "v") return false
+                return true
+            })
+
+            terminal.write("Welcome to Agent Web OS\r\n")
+            terminal.write("Sandbox initialized. Node.js + Python available.\r\n")
+            terminal.write("Type 'help' for available commands.\r\n\r\n")
+            terminal.write("$ ")
+
+            terminalRef.current = terminal
+            dataDisposable = terminal.onData(handleData)
+
+            observer = new ResizeObserver(() => {
+                try { fitAddon.fit() } catch { /* ignore */ }
+            })
+            observer.observe(container)
+        })()
 
         return () => {
-            dataDisposable.dispose()
-            observer.disconnect()
-            terminal.dispose()
-            session.dispose()
+            disposed = true
+            dataDisposable?.dispose()
+            observer?.disconnect()
+            terminal?.dispose()
+            session?.dispose()
             terminalRef.current = null
             sessionRef.current = null
+            executeBashRef.current = null
         }
     }, [handleData])
 
