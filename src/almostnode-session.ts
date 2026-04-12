@@ -2331,6 +2331,11 @@ exports.LRUCache = LRUCache;
 
             syncExecution = false
 
+            // Yield to the event loop so that async entry points
+            // (e.g. `async function main(){ … }; main()`) have a chance
+            // to register stdin listeners before we check.
+            await new Promise<void>((r) => setTimeout(r, 0))
+
             // If the process registered stdin listeners (interactive / TUI), keep
             // it alive until process.exit() is called instead of exiting after 0 ms.
             const isInteractive = process.stdin
