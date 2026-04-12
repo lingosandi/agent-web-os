@@ -20,9 +20,14 @@ function useTerminal() {
         const session = sessionRef.current
         if (!terminal || !session) return
 
+        // When a command is running, forward raw input to its stdin
+        if (runningRef.current) {
+            session.almostNodeSession.writeStdin(data)
+            return
+        }
+
         for (const char of data) {
             if (char === "\u0003") {
-                runningRef.current = false
                 inputBufferRef.current = ""
                 terminal.write("^C\r\n$ ")
                 continue
@@ -108,6 +113,11 @@ function useTerminal() {
         session.almostNodeSession.setStdoutWriter((data) => {
             streamedBytesRef.current += data.length
             terminal.write(data.replace(/\n/g, "\r\n"))
+        })
+
+        session.almostNodeSession.setTerminalSize(terminal.cols, terminal.rows)
+        terminal.onResize(({ cols, rows }) => {
+            session.almostNodeSession.setTerminalSize(cols, rows)
         })
 
         terminal.attachCustomKeyEventHandler((event) => {

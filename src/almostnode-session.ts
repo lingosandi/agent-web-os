@@ -446,6 +446,9 @@ export class AlmostNodeSession {
     private binCommandRegistrar?: BinCommandRegistrar
     private batchFileLoader?: BatchFileLoader
     private stdoutWriter?: (data: string) => void
+    private _stdinHandler: ((data: string) => void) | null = null
+    private _terminalColumns = 80
+    private _terminalRows = 24
     private viteServer?: ViteDevServer
     private vitePort: number | null = null
     private vitePreviewUrl: string | null = null
@@ -602,6 +605,17 @@ export class AlmostNodeSession {
 
     setStdoutWriter(writer: ((data: string) => void) | undefined): void {
         this.stdoutWriter = writer
+    }
+
+    /** Send data to the stdin of the currently running interactive process. */
+    writeStdin(data: string): void {
+        this._stdinHandler?.(data)
+    }
+
+    /** Update terminal dimensions (used for process.stdout.columns/rows). */
+    setTerminalSize(columns: number, rows: number): void {
+        this._terminalColumns = columns
+        this._terminalRows = rows
     }
 
     setVitePreviewListener(listener: VitePreviewListener | undefined): void {
@@ -2193,7 +2207,10 @@ exports.LRUCache = LRUCache;
         const runtime = new Runtime(this.vfs, {
             cwd,
             env: runtimeEnv,
-            onStdout: (chunk) => appendChunk(stdoutChunks, chunk),
+            onStdout: (chunk) => {
+                appendChunk(stdoutChunks, chunk)
+                this.stdoutWriter?.(chunk)
+            },
             onStderr: (chunk) => appendChunk(stderrChunks, chunk),
             onConsole: (method, consoleArgs) => {
                 const formatted = consoleArgs.map((value) => {
@@ -2223,10 +2240,28 @@ exports.LRUCache = LRUCache;
                 }
 
                 appendChunk(stdoutChunks, chunk)
+                this.stdoutWriter?.(chunk)
             },
         })
 
         const process = runtime.getProcess()
+
+        // Enable TTY mode so TUI applications detect a terminal
+        process.stdout.isTTY = true
+        process.stderr.isTTY = true
+        if (process.stdin) {
+            process.stdin.isTTY = true
+        }
+        const stdoutAny = process.stdout as Record<string, unknown>
+        stdoutAny.columns = this._terminalColumns
+        stdoutAny.rows = this._terminalRows
+        stdoutAny.getWindowSize = () => [this._terminalColumns, this._terminalRows]
+
+        // Forward stdin from the host terminal into process.stdin
+        this._stdinHandler = process.stdin
+            ? (data: string) => { process.stdin.emit("data", data) }
+            : null
+
         const originalExit = process.exit
         let exitCalled = false
         let exitCode = 0
@@ -2296,12 +2331,18 @@ exports.LRUCache = LRUCache;
 
             syncExecution = false
 
-            const asyncExitCode = await Promise.race<number | null>([
-                exitPromise,
-                new Promise<null>((resolve) => {
-                    setTimeout(() => resolve(null), 0)
-                }),
-            ])
+            // If the process registered stdin listeners (interactive / TUI), keep
+            // it alive until process.exit() is called instead of exiting after 0 ms.
+            const isInteractive = process.stdin
+                && (process.stdin.listenerCount("data") > 0 || process.stdin.listenerCount("keypress") > 0)
+            const asyncExitCode = isInteractive
+                ? await exitPromise
+                : await Promise.race<number | null>([
+                    exitPromise,
+                    new Promise<null>((resolve) => {
+                        setTimeout(() => resolve(null), 0)
+                    }),
+                ])
 
             await this.flushPendingOperations()
 
@@ -2340,6 +2381,7 @@ exports.LRUCache = LRUCache;
                 exitCode: 1,
             }
         } finally {
+            this._stdinHandler = null
             if (canListenForUnhandledRejection) {
                 globalThis.removeEventListener("unhandledrejection", rejectionHandler)
             }
