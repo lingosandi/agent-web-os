@@ -5,10 +5,10 @@ import {
     ObservableInMemoryFs,
     type ObservableInMemoryFsOptions,
 } from "./observable-in-memory-fs"
-import {
-    createAlmostNodeSession,
-} from "./almostnode-session"
 import { executeFd } from "./fd-command"
+
+import type { AlmostNodeSession } from "./almostnode-session"
+import type { PyodideSession } from "./pyodide-session"
 
 export const DEFAULT_BASH_SHELL_ENV = {
     LANG: "C.UTF-8",
@@ -39,7 +39,11 @@ type BrowserBashSessionOptions = {
     env?: Record<string, string>
     /** Options for the ObservableInMemoryFs */
     fsOptions?: ObservableInMemoryFsOptions
-    /** Additional custom commands to register alongside the built-in node/npm commands */
+    /** Enable Node.js runtime (node, npm commands). Lazy-loaded on first use. (default: false) */
+    node?: boolean
+    /** Enable Python runtime via Pyodide (python, python3, pip commands). Lazy-loaded on first use. (default: false) */
+    python?: boolean
+    /** Additional custom commands to register alongside the built-in commands */
     customCommands?: CustomCommand[]
 }
 
@@ -81,7 +85,7 @@ function truncateBashOutput(output: string, limitBytes = DEFAULT_BASH_OUTPUT_LIM
     return `${output.slice(0, headBytes)}\n\n... [${omittedBytes} bytes truncated] ...\n\n${output.slice(-tailBytes)}`
 }
 
-/** Create a browser-based bash session with in-memory filesystem and almostnode */
+/** Create a browser-based bash session with in-memory filesystem */
 export function createBrowserBashSession(options: BrowserBashSessionOptions = {}): BrowserBashSession {
     const rootPath = normalizeBashPath(options.rootPath ?? "/workspace")
     const env = options.env ?? { ...DEFAULT_BASH_SHELL_ENV }
@@ -99,22 +103,66 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
     fs.writeFileSync(`${piBinDir}/rg`, "#!/bin/sh\nrg \"$@\"\n")
     fs.writeFileSync(`${piBinDir}/fd`, "#!/bin/sh\nfd \"$@\"\n")
 
-    const almostNodeSession = createAlmostNodeSession(fs)
+    // Lazy-loaded runtime sessions
+    let almostNodeSession: AlmostNodeSession | null = null
+    let almostNodeSessionPromise: Promise<AlmostNodeSession> | null = null
+    let pyodideSession: PyodideSession | null = null
+    let pyodideSessionPromise: Promise<PyodideSession> | null = null
+
+    async function getAlmostNodeSession(): Promise<AlmostNodeSession> {
+        if (almostNodeSession) return almostNodeSession
+        if (almostNodeSessionPromise) return almostNodeSessionPromise
+        almostNodeSessionPromise = import("./almostnode-session").then(({ createAlmostNodeSession }) => {
+            almostNodeSession = createAlmostNodeSession(fs)
+            almostNodeSession.setBinCommandRegistrar((name, handler) => {
+                bash.registerCommand(defineCommand(name, handler))
+            })
+            if (currentStdoutWriter) almostNodeSession.setStdoutWriter(currentStdoutWriter)
+            return almostNodeSession
+        })
+        return almostNodeSessionPromise
+    }
+
+    async function getPyodideSession(): Promise<PyodideSession> {
+        if (pyodideSession) return pyodideSession
+        if (pyodideSessionPromise) return pyodideSessionPromise
+        pyodideSessionPromise = import("./pyodide-session").then(({ createPyodideSession }) => {
+            pyodideSession = createPyodideSession(fs)
+            if (currentStdoutWriter) pyodideSession.setStdoutWriter(currentStdoutWriter)
+            return pyodideSession
+        })
+        return pyodideSessionPromise
+    }
+
+    let currentStdoutWriter: ((data: string) => void) | undefined
+
+    // Build custom commands based on enabled runtimes
+    const runtimeCommands: CustomCommand[] = []
+
+    if (options.node) {
+        runtimeCommands.push(
+            defineCommand("node", async (args, ctx) => (await getAlmostNodeSession()).executeNode(args, ctx)),
+            defineCommand("npm", async (args, ctx) => (await getAlmostNodeSession()).executeNpm(args, ctx)),
+        )
+    }
+
+    if (options.python) {
+        runtimeCommands.push(
+            defineCommand("python", async (args, ctx) => (await getPyodideSession()).executePython(args, ctx)),
+            defineCommand("python3", async (args, ctx) => (await getPyodideSession()).executePython(args, ctx)),
+            defineCommand("pip", async (args, ctx) => (await getPyodideSession()).executePip(args, ctx)),
+        )
+    }
 
     const bash = new Bash({
         cwd: rootPath,
         env: { ...env },
         fs,
         customCommands: [
-            defineCommand("node", async (args, ctx) => almostNodeSession.executeNode(args, ctx)),
-            defineCommand("npm", async (args, ctx) => almostNodeSession.executeNpm(args, ctx)),
+            ...runtimeCommands,
             defineCommand("fd", async (args, ctx) => executeFd(args, ctx)),
             ...(options.customCommands ?? []),
         ],
-    })
-
-    almostNodeSession.setBinCommandRegistrar((name, handler) => {
-        bash.registerCommand(defineCommand(name, handler))
     })
 
     return {
@@ -122,11 +170,16 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
         bash,
         rootPath,
         cwd: rootPath,
-        setStdoutWriter: (writer) => almostNodeSession.setStdoutWriter(writer),
-        writeStdin: (data) => almostNodeSession.writeStdin(data),
-        setTerminalSize: (columns, rows) => almostNodeSession.setTerminalSize(columns, rows),
+        setStdoutWriter: (writer) => {
+            currentStdoutWriter = writer
+            almostNodeSession?.setStdoutWriter(writer)
+            pyodideSession?.setStdoutWriter(writer)
+        },
+        writeStdin: (data) => almostNodeSession?.writeStdin(data),
+        setTerminalSize: (columns, rows) => almostNodeSession?.setTerminalSize(columns, rows),
         dispose: () => {
-            almostNodeSession.dispose()
+            almostNodeSession?.dispose()
+            pyodideSession?.dispose()
         },
     }
 }

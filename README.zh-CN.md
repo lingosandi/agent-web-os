@@ -20,7 +20,7 @@ yarn add agent-web-os
 ```ts
 import { createBrowserBashSession, executeBrowserBash } from "agent-web-os"
 
-const session = createBrowserBashSession({ rootPath: "/workspace" })
+const session = createBrowserBashSession({ rootPath: "/workspace", node: true, python: true })
 
 export async function runAgentWebOsDemo() {
     const result = await executeBrowserBash(session, "node --version")
@@ -45,7 +45,7 @@ import { FitAddon } from "@xterm/addon-fit"
 import "@xterm/xterm/css/xterm.css"
 import { createBrowserBashSession, executeBrowserBash } from "agent-web-os"
 
-const session = createBrowserBashSession({ rootPath: "/workspace" })
+const session = createBrowserBashSession({ rootPath: "/workspace", node: true, python: true })
 const terminal = new Terminal({ convertEol: true, cursorBlink: true })
 const fitAddon = new FitAddon()
 
