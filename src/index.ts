@@ -1,4 +1,4 @@
-export const AGENT_WEB_OS_VERSION = "0.1.19"
+export const AGENT_WEB_OS_VERSION = "0.2.0"
 console.log(`[agent-web-os] v${AGENT_WEB_OS_VERSION}`)
 
 export {
@@ -8,12 +8,6 @@ export {
     type ObservableInMemoryFsChangeEvent,
     type ObservableInMemoryFsChangeEventName,
 } from "./observable-in-memory-fs"
-
-export {
-    AlmostNodeSession,
-    createAlmostNodeSession,
-    type AlmostNodeSessionVfs,
-} from "./almostnode-session"
 
 export {
     createBrowserBashSession,

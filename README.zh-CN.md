@@ -54,11 +54,11 @@ terminal.open(container)
 fitAddon.fit()
 
 void executeBrowserBash(session, "python --version")
-session.almostNodeSession.setStdoutWriter((data) => terminal.write(data))
-session.almostNodeSession.setTerminalSize(terminal.cols, terminal.rows)
+session.setStdoutWriter((data) => terminal.write(data))
+session.setTerminalSize(terminal.cols, terminal.rows)
 
 terminal.onData((data) => {
-    session.almostNodeSession.writeStdin(data)
+    session.writeStdin(data)
 })
 ```
 

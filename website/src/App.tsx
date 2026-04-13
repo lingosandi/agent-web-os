@@ -37,11 +37,11 @@ terminal.open(container)
 fitAddon.fit()
 
 void executeBrowserBash(session, "python --version")
-session.almostNodeSession.setStdoutWriter((data) => terminal.write(data))
-session.almostNodeSession.setTerminalSize(terminal.cols, terminal.rows)
+session.setStdoutWriter((data) => terminal.write(data))
+session.setTerminalSize(terminal.cols, terminal.rows)
 
 terminal.onData((data) => {
-    session.almostNodeSession.writeStdin(data)
+    session.writeStdin(data)
 })`
 
 function useTerminal() {
@@ -96,7 +96,7 @@ function useTerminal() {
 
         // When a command is running, forward raw input to its stdin
         if (runningRef.current) {
-            session.almostNodeSession.writeStdin(data)
+            session.writeStdin(data)
             return
         }
 
@@ -186,14 +186,14 @@ function useTerminal() {
             terminal.open(container)
             fitAddon.fit()
 
-            session.almostNodeSession.setStdoutWriter((data) => {
+            session.setStdoutWriter((data) => {
                 streamedBytesRef.current += data.length
                 terminal!.write(data)
             })
 
-            session.almostNodeSession.setTerminalSize(terminal.cols, terminal.rows)
+            session.setTerminalSize(terminal.cols, terminal.rows)
             terminal.onResize(({ cols, rows }) => {
-                session!.almostNodeSession.setTerminalSize(cols, rows)
+                session!.setTerminalSize(cols, rows)
             })
 
             terminal.attachCustomKeyEventHandler((event) => {

@@ -6,7 +6,6 @@ import {
     type ObservableInMemoryFsOptions,
 } from "./observable-in-memory-fs"
 import {
-    AlmostNodeSession,
     createAlmostNodeSession,
 } from "./almostnode-session"
 import { executeFd } from "./fd-command"
@@ -25,9 +24,11 @@ const DEFAULT_BASH_OUTPUT_LIMIT = 10_000
 export type BrowserBashSession = {
     fs: ObservableInMemoryFs
     bash: Bash
-    almostNodeSession: AlmostNodeSession
     rootPath: string
     cwd: string
+    setStdoutWriter: (writer: ((data: string) => void) | undefined) => void
+    writeStdin: (data: string) => void
+    setTerminalSize: (columns: number, rows: number) => void
     dispose: () => void
 }
 
@@ -119,9 +120,11 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
     return {
         fs,
         bash,
-        almostNodeSession,
         rootPath,
         cwd: rootPath,
+        setStdoutWriter: (writer) => almostNodeSession.setStdoutWriter(writer),
+        writeStdin: (data) => almostNodeSession.writeStdin(data),
+        setTerminalSize: (columns, rows) => almostNodeSession.setTerminalSize(columns, rows),
         dispose: () => {
             almostNodeSession.dispose()
         },
