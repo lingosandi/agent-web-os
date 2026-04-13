@@ -246,7 +246,7 @@ export default function App() {
                     <div>AGENT-WEB-OS // V.0.1.2</div>
                     <div>STATUS: KERNEL_READY</div>
                     <div className="header-links">
-                        <a href="https://github.com/nicoshl/agent-web-os" target="_blank" rel="noopener noreferrer" className="header-btn">GitHub</a>
+                        <a href="https://github.com/lingosandi/agent-web-os" target="_blank" rel="noopener noreferrer" className="header-btn">GitHub</a>
                         <a href="https://www.npmjs.com/package/agent-web-os" target="_blank" rel="noopener noreferrer" className="header-btn">npm</a>
                     </div>
                 </div>
@@ -378,7 +378,7 @@ export default function App() {
                 <footer>
                     <div>OPEN SOURCE // MIT LICENSE</div>
                     <div>[ NPM: agent-web-os ]</div>
-                    <div>GITHUB.COM/NICOSHL/AGENT-WEB-OS</div>
+                    <div>GITHUB.COM/LINGOSANDI/AGENT-WEB-OS</div>
                 </footer>
             </main>
         </>
