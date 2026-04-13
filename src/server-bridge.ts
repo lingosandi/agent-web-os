@@ -14,24 +14,32 @@ export type ServerBridge = {
     getServerUrl(port: number): string
 }
 
-let globalBridge: ServerBridge | null = null
-let almostnodePromise: Promise<{ getServerBridge(): ServerBridge; resetServerBridge(): void }> | null = null
-
-function loadAlmostnode() {
-    if (!almostnodePromise) {
-        almostnodePromise = import("almostnode/server-bridge") as Promise<{ getServerBridge(): ServerBridge; resetServerBridge(): void }>
-    }
-    return almostnodePromise
+type AlmostNodeServerBridgeModule = {
+    getServerBridge(): ServerBridge
+    resetServerBridge(): void
 }
 
+let globalBridge: ServerBridge | null = null
+let almostnodeModule: AlmostNodeServerBridgeModule | null = null
+let almostnodePromise: Promise<AlmostNodeServerBridgeModule> | null = null
+
 export async function getServerBridge(): Promise<ServerBridge> {
-    if (!globalBridge) {
-        const mod = await loadAlmostnode()
-        globalBridge = mod.getServerBridge()
+    if (!almostnodeModule) {
+        if (!almostnodePromise) {
+            almostnodePromise = import("almostnode/server-bridge") as Promise<AlmostNodeServerBridgeModule>
+        }
+
+        almostnodeModule = await almostnodePromise
     }
+
+    if (!globalBridge) {
+        globalBridge = almostnodeModule.getServerBridge()
+    }
+
     return globalBridge
 }
 
 export function resetServerBridge(): void {
+    almostnodeModule?.resetServerBridge()
     globalBridge = null
 }

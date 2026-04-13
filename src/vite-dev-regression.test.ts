@@ -57,7 +57,7 @@ function createFixturePackage(rootDir: string): void {
     writeFileSync(
         path.join(appDir, "main.js"),
         `import { createBrowserBashSession } from "agent-web-os";
-const session = createBrowserBashSession({ rootPath: "/workspace", node: true, python: true });
+const session = createBrowserBashSession({ rootPath: "/workspace", python: true });
 window.__agentWebOsSession = session;
 document.querySelector("#app").textContent = "ready";
 `,

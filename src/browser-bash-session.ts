@@ -155,7 +155,7 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
         fs,
         customCommands: [
             ...runtimeCommands,
-            defineCommand("fd", async (args, ctx) => executeFd(args, ctx)),
+            defineCommand("fd", executeFd),
             ...(options.customCommands ?? []),
         ],
     })

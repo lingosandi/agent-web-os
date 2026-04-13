@@ -683,12 +683,8 @@ export class AlmostNodeSession {
         const cached = this.resolveBarePkgEntryCache.get(cacheKey)
         if (cached !== undefined) return cached
 
-        const result = this._resolveBarePkgEntry(specifier, root)
-        this.resolveBarePkgEntryCache.set(cacheKey, result)
-        return result
-    }
+        let result: string | null = null
 
-    private _resolveBarePkgEntry(specifier: string, root: string): string | null {
         // Split specifier into package name + sub-path
         let pkgName: string
         let subPath: string
@@ -727,49 +723,67 @@ export class AlmostNodeSession {
                 const exportsMap = pkgJson.exports as Record<string, unknown>
                 const entry = this.resolveExportsEntry(exportsMap, `./${subPath}`)
                     ?? this.resolveWildcardExports(exportsMap, subPath)
-                if (entry) return `/node_modules/${pkgName}/${stripDotSlash(entry)}`
+                if (entry) {
+                    result = `/node_modules/${pkgName}/${stripDotSlash(entry)}`
+                }
             }
 
-            // Try direct file paths
-            const candidates = [
-                `/node_modules/${pkgName}/${subPath}`,
-                `/node_modules/${pkgName}/${subPath}.js`,
-                `/node_modules/${pkgName}/${subPath}.mjs`,
-                `/node_modules/${pkgName}/${subPath}/index.js`,
-                `/node_modules/${pkgName}/${subPath}/index.mjs`,
-            ]
-            for (const candidate of candidates) {
-                if (this.vfs.existsSync(`${root}${candidate}`)) return candidate
+            if (!result) {
+                const candidates = [
+                    `/node_modules/${pkgName}/${subPath}`,
+                    `/node_modules/${pkgName}/${subPath}.js`,
+                    `/node_modules/${pkgName}/${subPath}.mjs`,
+                    `/node_modules/${pkgName}/${subPath}/index.js`,
+                    `/node_modules/${pkgName}/${subPath}/index.mjs`,
+                ]
+                for (const candidate of candidates) {
+                    if (this.vfs.existsSync(`${root}${candidate}`)) {
+                        result = candidate
+                        break
+                    }
+                }
             }
-            return `/node_modules/${pkgName}/${subPath}`
+
+            result ??= `/node_modules/${pkgName}/${subPath}`
+            this.resolveBarePkgEntryCache.set(cacheKey, result)
+            return result
         }
 
         // Root import: resolve entry point
         if (pkgJson?.exports && typeof pkgJson.exports === "object") {
             const entry = this.resolveExportsEntry(pkgJson.exports as Record<string, unknown>, ".")
-            if (entry) return `/node_modules/${pkgName}/${stripDotSlash(entry)}`
+            if (entry) {
+                result = `/node_modules/${pkgName}/${stripDotSlash(entry)}`
+            }
         }
 
         // "module" field (ESM entry)
-        if (typeof pkgJson?.module === "string") {
-            return `/node_modules/${pkgName}/${stripDotSlash(pkgJson.module)}`
+        if (!result && typeof pkgJson?.module === "string") {
+            result = `/node_modules/${pkgName}/${stripDotSlash(pkgJson.module)}`
         }
 
         // "main" field
-        if (typeof pkgJson?.main === "string") {
-            return `/node_modules/${pkgName}/${stripDotSlash(pkgJson.main)}`
+        if (!result && typeof pkgJson?.main === "string") {
+            result = `/node_modules/${pkgName}/${stripDotSlash(pkgJson.main)}`
         }
 
         // Fallback
-        const fallbacks = [
-            `/node_modules/${pkgName}/index.js`,
-            `/node_modules/${pkgName}/index.mjs`,
-        ]
-        for (const fb of fallbacks) {
-            if (this.vfs.existsSync(`${root}${fb}`)) return fb
+        if (!result) {
+            const fallbacks = [
+                `/node_modules/${pkgName}/index.js`,
+                `/node_modules/${pkgName}/index.mjs`,
+            ]
+            for (const fallbackPath of fallbacks) {
+                if (this.vfs.existsSync(`${root}${fallbackPath}`)) {
+                    result = fallbackPath
+                    break
+                }
+            }
         }
 
-        return `/node_modules/${pkgName}/index.js`
+        result ??= `/node_modules/${pkgName}/index.js`
+        this.resolveBarePkgEntryCache.set(cacheKey, result)
+        return result
     }
 
     private resolveExportsEntry(exports: Record<string, unknown>, key: string): string | null {

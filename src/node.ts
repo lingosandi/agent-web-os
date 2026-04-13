@@ -23,6 +23,9 @@ export async function enableNode(session: BrowserBashSession): Promise<BrowserBa
     }
 
     const almostNodeSession = new AlmostNodeSession(session.fs)
+    const executeNode = almostNodeSession.executeNode.bind(almostNodeSession)
+    const executeNpm = almostNodeSession.executeNpm.bind(almostNodeSession)
+
     almostNodeSession.setBinCommandRegistrar((name, handler) => {
         session.bash.registerCommand(defineCommand(name, handler))
     })
@@ -35,10 +38,10 @@ export async function enableNode(session: BrowserBashSession): Promise<BrowserBa
     })
 
     session.bash.registerCommand(
-        defineCommand("node", async (args, ctx) => almostNodeSession.executeNode(args, ctx)),
+        defineCommand("node", executeNode),
     )
     session.bash.registerCommand(
-        defineCommand("npm", async (args, ctx) => almostNodeSession.executeNpm(args, ctx)),
+        defineCommand("npm", executeNpm),
     )
 
     enabledNodeSessions.add(session)

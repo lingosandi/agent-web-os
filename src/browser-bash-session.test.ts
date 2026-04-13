@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import {
+    attachBrowserBashSessionRuntimeAdapter,
+    BROWSER_BASH_SESSION_INTERNALS,
     createBrowserBashSession,
     executeBrowserBash,
     DEFAULT_BASH_SHELL_ENV,
@@ -84,6 +86,70 @@ describe("createBrowserBashSession", () => {
 
         expect(result.exitCode).not.toBe(0)
         expect(result.stderr).toMatch(/not found|not available/i)
+    })
+
+    it("tracks runtime adapters and propagates terminal events", () => {
+        const session = createBrowserBashSession()
+        const writer = vi.fn()
+        const adapter = {
+            setStdoutWriter: vi.fn(),
+            writeStdin: vi.fn(),
+            setTerminalSize: vi.fn(),
+            dispose: vi.fn(),
+        }
+
+        attachBrowserBashSessionRuntimeAdapter(session, adapter)
+        session.setStdoutWriter(writer)
+        session.writeStdin("input")
+        session.setTerminalSize(120, 40)
+        session.dispose()
+
+        expect(adapter.setStdoutWriter).toHaveBeenNthCalledWith(1, undefined)
+        expect(adapter.setStdoutWriter).toHaveBeenNthCalledWith(2, writer)
+        expect(adapter.writeStdin).toHaveBeenCalledWith("input")
+        expect(adapter.setTerminalSize).toHaveBeenCalledWith(120, 40)
+        expect(adapter.dispose).toHaveBeenCalledTimes(1)
+    })
+
+    it("immediately syncs the current stdout writer to newly attached adapters", () => {
+        const session = createBrowserBashSession()
+        const writer = vi.fn()
+        const adapter = {
+            setStdoutWriter: vi.fn(),
+        }
+
+        session.setStdoutWriter(writer)
+        attachBrowserBashSessionRuntimeAdapter(session, adapter)
+
+        expect(adapter.setStdoutWriter).toHaveBeenCalledWith(writer)
+    })
+
+    it("rejects attaching a runtime adapter to a non-session object", () => {
+        expect(() => {
+            attachBrowserBashSessionRuntimeAdapter({
+                fs: {} as never,
+                bash: {} as never,
+                rootPath: "/workspace",
+                cwd: "/workspace",
+                setStdoutWriter: vi.fn(),
+                writeStdin: vi.fn(),
+                setTerminalSize: vi.fn(),
+                dispose: vi.fn(),
+            }, { setStdoutWriter: vi.fn() })
+        }).toThrow("Expected createBrowserBashSession() session")
+    })
+
+    it("stores internal runtime adapter state on the session", () => {
+        const session = createBrowserBashSession()
+        const adapter = { dispose: vi.fn() }
+
+        attachBrowserBashSessionRuntimeAdapter(session, adapter)
+
+        const internals = (session as BrowserBashSession & {
+            [BROWSER_BASH_SESSION_INTERNALS]: { runtimeAdapters: Set<unknown> }
+        })[BROWSER_BASH_SESSION_INTERNALS]
+
+        expect(internals.runtimeAdapters.has(adapter)).toBe(true)
     })
 })
 
