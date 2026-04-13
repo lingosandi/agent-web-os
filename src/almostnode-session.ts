@@ -1,10 +1,6 @@
 import type { CommandContext, ExecResult } from "just-bash/browser"
 import { posixPath as path } from "./posix-path"
-import { PackageManager } from "almostnode/npm"
-import { Runtime } from "almostnode/runtime"
-import { getServerBridge } from "almostnode/server-bridge"
-import { VirtualFS } from "almostnode/virtual-fs"
-import { ViteDevServer } from "almostnode/frameworks/vite-dev-server"
+import { PackageManager, Runtime, getServerBridge, VirtualFS, ViteDevServer } from "almostnode"
 
 import {
     ObservableInMemoryFs,
@@ -1971,7 +1967,7 @@ exports.LRUCache = LRUCache;
                         }
 
                         const globalCwd = normalizePath(path.join(GLOBAL_NODE_MODULES_ROOT, ".."))
-                        const packageManager = new PackageManager(this.vfs, { cwd: globalCwd })
+                        const packageManager = new PackageManager(this.vfs as unknown as VirtualFS, { cwd: globalCwd })
 
                         for (const packageSpec of packageSpecs) {
                             const installResult = await packageManager.install(packageSpec, {
@@ -2010,7 +2006,7 @@ exports.LRUCache = LRUCache;
 
                         await ensureEsbuildWasm()
 
-                        const packageManager = new PackageManager(this.vfs, { cwd })
+                        const packageManager = new PackageManager(this.vfs as unknown as VirtualFS, { cwd })
 
                         if (packageSpecs.length === 0) {
                             const installResult = await packageManager.installFromPackageJson({
@@ -2052,7 +2048,7 @@ exports.LRUCache = LRUCache;
             }
             case "ls":
             case "list": {
-                const packageManager = new PackageManager(this.vfs, { cwd })
+                const packageManager = new PackageManager(this.vfs as unknown as VirtualFS, { cwd })
                 const packages = Object.entries(packageManager.list())
 
                 if (packages.length === 0) {
@@ -2204,7 +2200,7 @@ exports.LRUCache = LRUCache;
             PWD: cwd,
         }
 
-        const runtime = new Runtime(this.vfs, {
+        const runtime = new Runtime(this.vfs as unknown as VirtualFS, {
             cwd,
             env: runtimeEnv,
             onStdout: (chunk) => {
@@ -2252,7 +2248,7 @@ exports.LRUCache = LRUCache;
         if (process.stdin) {
             process.stdin.isTTY = true
         }
-        const stdoutAny = process.stdout as Record<string, unknown>
+        const stdoutAny = process.stdout as unknown as Record<string, unknown>
         stdoutAny.columns = this._terminalColumns
         stdoutAny.rows = this._terminalRows
         stdoutAny.getWindowSize = () => [this._terminalColumns, this._terminalRows]
@@ -2327,8 +2323,8 @@ exports.LRUCache = LRUCache;
         if (process.pid == null) {
             process.pid = 1
         }
-        if (typeof process.kill !== "function") {
-            process.kill = () => { /* no-op in browser */ }
+        if (typeof (process as any).kill !== "function") {
+            (process as any).kill = () => { /* no-op in browser */ }
         }
 
         const rejectionHandler = (event: PromiseRejectionEvent) => {
@@ -2502,7 +2498,7 @@ exports.LRUCache = LRUCache;
 
         await ensureEsbuildWasm()
 
-        this.viteServer = new ViteDevServer(this.vfs, { port, root: cwd })
+        this.viteServer = new ViteDevServer(this.vfs as unknown as VirtualFS, { port, root: cwd })
         this.viteServer.start()
 
         await bridge.initServiceWorker()

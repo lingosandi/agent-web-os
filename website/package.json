@@ -10,9 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "agent-web-os": "^0.2.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "agent-web-os": "^0.2.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

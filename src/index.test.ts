@@ -6,8 +6,6 @@ vi.spyOn(console, "log").mockImplementation(() => {})
 import {
     AGENT_WEB_OS_VERSION,
     ObservableInMemoryFs,
-    AlmostNodeSession,
-    createAlmostNodeSession,
     createBrowserBashSession,
     executeBrowserBash,
     DEFAULT_BASH_SHELL_ENV,
@@ -26,15 +24,6 @@ describe("index exports", () => {
     it("exports ObservableInMemoryFs", () => {
         expect(ObservableInMemoryFs).toBeDefined()
         expect(typeof ObservableInMemoryFs).toBe("function")
-    })
-
-    it("exports AlmostNodeSession", () => {
-        expect(AlmostNodeSession).toBeDefined()
-        expect(typeof AlmostNodeSession).toBe("function")
-    })
-
-    it("exports createAlmostNodeSession", () => {
-        expect(typeof createAlmostNodeSession).toBe("function")
     })
 
     it("exports createBrowserBashSession", () => {

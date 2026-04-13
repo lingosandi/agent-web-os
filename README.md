@@ -53,7 +53,6 @@ terminal.loadAddon(fitAddon)
 terminal.open(container)
 fitAddon.fit()
 
-void executeBrowserBash(session, "python --version")
 session.setStdoutWriter((data) => terminal.write(data))
 session.setTerminalSize(terminal.cols, terminal.rows)
 
