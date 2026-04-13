@@ -1,4 +1,4 @@
-export const AGENT_WEB_OS_VERSION = "0.3.0"
+export const AGENT_WEB_OS_VERSION = "0.3.1"
 console.log(`[agent-web-os] v${AGENT_WEB_OS_VERSION}`)
 
 export {
@@ -24,15 +24,6 @@ export type { ToolResult } from "./types"
 export { Bash, defineCommand } from "just-bash/browser"
 export type { CommandContext, ExecResult, CustomCommand } from "just-bash/browser"
 
-// Re-export almostnode server-bridge utilities
-import { getServerBridge as _getServerBridge, resetServerBridge as _resetServerBridge } from "almostnode"
-
-export type ServerBridge = {
-    initServiceWorker(): Promise<void>
-    registerServer(server: unknown, port: number): void
-    unregisterServer(port: number): void
-    getServerUrl(port: number): string
-}
-
-export const getServerBridge: () => ServerBridge = _getServerBridge
-export const resetServerBridge: () => void = _resetServerBridge
+// Re-export server-bridge utilities (lazy-loaded to avoid pulling almostnode into the main chunk)
+import { getServerBridge, resetServerBridge, type ServerBridge } from "./server-bridge"
+export { getServerBridge, resetServerBridge, type ServerBridge }

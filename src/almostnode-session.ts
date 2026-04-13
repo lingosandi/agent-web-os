@@ -1,6 +1,7 @@
 import type { CommandContext, ExecResult } from "just-bash/browser"
 import { posixPath as path } from "./posix-path"
-import { PackageManager, Runtime, getServerBridge, VirtualFS, ViteDevServer } from "almostnode"
+import { PackageManager, Runtime, VirtualFS, ViteDevServer } from "almostnode"
+import { getServerBridge } from "./server-bridge"
 
 import {
     ObservableInMemoryFs,
@@ -449,6 +450,7 @@ export class AlmostNodeSession {
     private vitePort: number | null = null
     private vitePreviewUrl: string | null = null
     private vitePreviewListener?: VitePreviewListener
+    private serverBridge?: import("./server-bridge").ServerBridge
     private parsedPackageJsonCache = new Map<string, { raw: string; value: Record<string, unknown> | null }>()
     private transformedTextCache = new Map<string, { source: string; transformed: string }>()
 
@@ -1000,7 +1002,7 @@ export class AlmostNodeSession {
 
         if (this.vitePort !== null) {
             try {
-                getServerBridge().unregisterServer(this.vitePort)
+                this.serverBridge?.unregisterServer(this.vitePort)
             } catch {
                 // ignore if not registered
             }
@@ -2494,7 +2496,8 @@ exports.LRUCache = LRUCache;
 
         this.stopViteServer()
 
-        const bridge = getServerBridge()
+        const bridge = await getServerBridge()
+        this.serverBridge = bridge
 
         await ensureEsbuildWasm()
 
