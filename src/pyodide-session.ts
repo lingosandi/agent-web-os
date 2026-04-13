@@ -165,25 +165,7 @@ export class PyodideSession {
         await this.initPromise
     }
 
-    private async syncWorkspaceToEmscriptenFS(cwd: string): Promise<void> {
-        if (!this.pyodide) return
-
-        // Determine the workspace root to sync
-        // Sync the root path that contains cwd
-        const workspaceRoot = this.getWorkspaceRoot(cwd)
-        await syncToEmscriptenFS(this.fs, this.pyodide.FS, workspaceRoot, workspaceRoot)
-    }
-
-    private async syncWorkspaceFromEmscriptenFS(cwd: string): Promise<void> {
-        if (!this.pyodide) return
-
-        const workspaceRoot = this.getWorkspaceRoot(cwd)
-        await syncFromEmscriptenFS(this.pyodide.FS, this.fs, workspaceRoot, workspaceRoot)
-    }
-
     private getWorkspaceRoot(cwd: string): string {
-        // Use the first path component under root as workspace root
-        // e.g. /workspace/project → /workspace
         const parts = cwd.split("/").filter(Boolean)
         return parts.length > 0 ? `/${parts[0]}` : "/workspace"
     }
@@ -218,7 +200,8 @@ export class PyodideSession {
         const pyodide = this.pyodide!
 
         // Sync filesystem before execution
-        this.syncWorkspaceToEmscriptenFS(cwd)
+        const workspaceRoot = this.getWorkspaceRoot(cwd)
+        await syncToEmscriptenFS(this.fs, pyodide.FS, workspaceRoot, workspaceRoot)
 
         let stdout = ""
         let stderr = ""
@@ -273,7 +256,7 @@ os.chdir(${JSON.stringify(cwd)})
             await pyodide.runPythonAsync(code)
 
             // Sync filesystem after execution
-            this.syncWorkspaceFromEmscriptenFS(cwd)
+            await syncFromEmscriptenFS(pyodide.FS, this.fs, workspaceRoot, workspaceRoot)
 
             return { stdout, stderr, exitCode: 0 }
         } catch (error) {
@@ -420,7 +403,7 @@ micropip.uninstall([${packageList}])
     }
 }
 
-function parsePythonArgs(args: string[]): 
+function parsePythonArgs(args: string[]):
     | { kind: "version" }
     | { kind: "help" }
     | { kind: "eval"; code: string }
@@ -465,6 +448,4 @@ function parsePythonArgs(args: string[]):
     return { kind: "run-file", filePath: first }
 }
 
-export function createPyodideSession(fs: ObservableInMemoryFs): PyodideSession {
-    return new PyodideSession(fs)
-}
+

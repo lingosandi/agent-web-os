@@ -2607,7 +2607,3 @@ exports.LRUCache = LRUCache;
         }
     }
 }
-
-export function createAlmostNodeSession(fs: ObservableInMemoryFs): AlmostNodeSession {
-    return new AlmostNodeSession(fs)
-}

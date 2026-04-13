@@ -112,8 +112,8 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
     async function getAlmostNodeSession(): Promise<AlmostNodeSession> {
         if (almostNodeSession) return almostNodeSession
         if (almostNodeSessionPromise) return almostNodeSessionPromise
-        almostNodeSessionPromise = import("./almostnode-session").then(({ createAlmostNodeSession }) => {
-            almostNodeSession = createAlmostNodeSession(fs)
+        almostNodeSessionPromise = import("./almostnode-session").then((mod) => {
+            almostNodeSession = new mod.AlmostNodeSession(fs)
             almostNodeSession.setBinCommandRegistrar((name, handler) => {
                 bash.registerCommand(defineCommand(name, handler))
             })
@@ -126,8 +126,8 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
     async function getPyodideSession(): Promise<PyodideSession> {
         if (pyodideSession) return pyodideSession
         if (pyodideSessionPromise) return pyodideSessionPromise
-        pyodideSessionPromise = import("./pyodide-session").then(({ createPyodideSession }) => {
-            pyodideSession = createPyodideSession(fs)
+        pyodideSessionPromise = import("./pyodide-session").then((mod) => {
+            pyodideSession = new mod.PyodideSession(fs)
             if (currentStdoutWriter) pyodideSession.setStdoutWriter(currentStdoutWriter)
             return pyodideSession
         })

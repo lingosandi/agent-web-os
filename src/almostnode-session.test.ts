@@ -1,19 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { AlmostNodeSession, createAlmostNodeSession, type AlmostNodeSessionVfs } from "./almostnode-session"
+import { AlmostNodeSession, type AlmostNodeSessionVfs } from "./almostnode-session"
 import { ObservableInMemoryFs } from "./observable-in-memory-fs"
 
 /** Wait a tick to let queued operations fire */
 async function tick(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 0))
 }
-
-describe("createAlmostNodeSession", () => {
-    it("returns an AlmostNodeSession instance", () => {
-        const fs = new ObservableInMemoryFs()
-        const session = createAlmostNodeSession(fs)
-        expect(session).toBeInstanceOf(AlmostNodeSession)
-    })
-})
 
 describe("AlmostNodeSession", () => {
     let fs: ObservableInMemoryFs

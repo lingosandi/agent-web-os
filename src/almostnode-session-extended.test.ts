@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { AlmostNodeSession, createAlmostNodeSession } from "./almostnode-session"
+import { AlmostNodeSession } from "./almostnode-session"
 import { ObservableInMemoryFs } from "./observable-in-memory-fs"
 
 async function tick(): Promise<void> {
