@@ -15,8 +15,10 @@ pnpm add @xterm/xterm @xterm/addon-fit
 yarn add @xterm/xterm @xterm/addon-fit`
 
 const VITE_SETUP_SNIPPET = String.raw`import { createBrowserBashSession, executeBrowserBash } from "agent-web-os"
+import { enableNode } from "agent-web-os/node"
 
-const session = createBrowserBashSession({ rootPath: "/workspace", node: true, python: true })
+const session = createBrowserBashSession({ rootPath: "/workspace", python: true })
+await enableNode(session)
 
 export async function runAgentWebOsDemo() {
     const result = await executeBrowserBash(session, "node --version")
@@ -27,8 +29,10 @@ const XTERM_HOOK_SNIPPET = String.raw`import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import "@xterm/xterm/css/xterm.css"
 import { createBrowserBashSession, executeBrowserBash } from "agent-web-os"
+import { enableNode } from "agent-web-os/node"
 
-const session = createBrowserBashSession({ rootPath: "/workspace", node: true, python: true })
+const session = createBrowserBashSession({ rootPath: "/workspace", python: true })
+await enableNode(session)
 const terminal = new Terminal({ convertEol: true, cursorBlink: true })
 const fitAddon = new FitAddon()
 
@@ -153,8 +157,9 @@ function useTerminal() {
         let observer: ResizeObserver | null = null
 
         void (async () => {
-            const [agentWebOs, xterm, xtermFit] = await Promise.all([
+            const [agentWebOs, agentWebOsNode, xterm, xtermFit] = await Promise.all([
                 import("agent-web-os"),
+                import("agent-web-os/node"),
                 import("@xterm/xterm"),
                 import("@xterm/addon-fit"),
                 import("@xterm/xterm/css/xterm.css"),
@@ -163,7 +168,8 @@ function useTerminal() {
 
             executeBashRef.current = agentWebOs.executeBrowserBash
 
-            session = agentWebOs.createBrowserBashSession({ rootPath: "/workspace", node: true, python: true })
+            session = agentWebOs.createBrowserBashSession({ rootPath: "/workspace", python: true })
+            await agentWebOsNode.enableNode(session)
             sessionRef.current = session
 
             terminal = new xterm.Terminal({

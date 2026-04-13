@@ -1,6 +1,9 @@
 import type { CommandContext, ExecResult } from "just-bash/browser"
 import { posixPath as path } from "./posix-path"
-import { PackageManager, Runtime, VirtualFS, ViteDevServer } from "almostnode"
+import { PackageManager } from "almostnode/npm"
+import { Runtime } from "almostnode/runtime"
+import { VirtualFS } from "almostnode/virtual-fs"
+import { ViteDevServer } from "almostnode/frameworks/vite-dev-server"
 import { getServerBridge } from "./server-bridge"
 
 import {

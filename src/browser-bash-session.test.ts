@@ -63,6 +63,28 @@ describe("createBrowserBashSession", () => {
         const session = createBrowserBashSession()
         expect(() => session.dispose()).not.toThrow()
     })
+
+    it("does not register npm unless node support is enabled", async () => {
+        const session = createBrowserBashSession()
+        const result = await session.bash.exec("npm --version", {
+            cwd: session.cwd,
+            env: { ...DEFAULT_BASH_SHELL_ENV, PWD: session.cwd },
+        })
+
+        expect(result.exitCode).not.toBe(0)
+        expect(result.stderr).toMatch(/not found|not available/i)
+    })
+
+    it("does not register python unless python support is enabled", async () => {
+        const session = createBrowserBashSession()
+        const result = await session.bash.exec("python --version", {
+            cwd: session.cwd,
+            env: { ...DEFAULT_BASH_SHELL_ENV, PWD: session.cwd },
+        })
+
+        expect(result.exitCode).not.toBe(0)
+        expect(result.stderr).toMatch(/not found|not available/i)
+    })
 })
 
 describe("executeBrowserBash", () => {

@@ -7,7 +7,6 @@ import {
 } from "./observable-in-memory-fs"
 import { executeFd } from "./fd-command"
 
-import type { AlmostNodeSession } from "./almostnode-session"
 import type { PyodideSession } from "./pyodide-session"
 
 export const DEFAULT_BASH_SHELL_ENV = {
@@ -32,6 +31,24 @@ export type BrowserBashSession = {
     dispose: () => void
 }
 
+type BrowserBashSessionRuntimeAdapter = {
+    setStdoutWriter?: (writer: ((data: string) => void) | undefined) => void
+    writeStdin?: (data: string) => void
+    setTerminalSize?: (columns: number, rows: number) => void
+    dispose?: () => void
+}
+
+type BrowserBashSessionInternals = {
+    currentStdoutWriter: ((data: string) => void) | undefined
+    runtimeAdapters: Set<BrowserBashSessionRuntimeAdapter>
+}
+
+export const BROWSER_BASH_SESSION_INTERNALS = Symbol("agent-web-os.browser-bash-session-internals")
+
+type BrowserBashSessionWithInternals = BrowserBashSession & {
+    [BROWSER_BASH_SESSION_INTERNALS]: BrowserBashSessionInternals
+}
+
 type BrowserBashSessionOptions = {
     /** Root path in the virtual filesystem (default: "/workspace") */
     rootPath?: string
@@ -39,8 +56,6 @@ type BrowserBashSessionOptions = {
     env?: Record<string, string>
     /** Options for the ObservableInMemoryFs */
     fsOptions?: ObservableInMemoryFsOptions
-    /** Enable Node.js runtime (node, npm commands). Lazy-loaded on first use. (default: false) */
-    node?: boolean
     /** Enable Python runtime via Pyodide (python, python3, pip commands). Lazy-loaded on first use. (default: false) */
     python?: boolean
     /** Additional custom commands to register alongside the built-in commands */
@@ -104,47 +119,27 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
     fs.writeFileSync(`${piBinDir}/fd`, "#!/bin/sh\nfd \"$@\"\n")
 
     // Lazy-loaded runtime sessions
-    let almostNodeSession: AlmostNodeSession | null = null
-    let almostNodeSessionPromise: Promise<AlmostNodeSession> | null = null
     let pyodideSession: PyodideSession | null = null
     let pyodideSessionPromise: Promise<PyodideSession> | null = null
-
-    async function getAlmostNodeSession(): Promise<AlmostNodeSession> {
-        if (almostNodeSession) return almostNodeSession
-        if (almostNodeSessionPromise) return almostNodeSessionPromise
-        almostNodeSessionPromise = import("./almostnode-session").then((mod) => {
-            almostNodeSession = new mod.AlmostNodeSession(fs)
-            almostNodeSession.setBinCommandRegistrar((name, handler) => {
-                bash.registerCommand(defineCommand(name, handler))
-            })
-            if (currentStdoutWriter) almostNodeSession.setStdoutWriter(currentStdoutWriter)
-            return almostNodeSession
-        })
-        return almostNodeSessionPromise
-    }
 
     async function getPyodideSession(): Promise<PyodideSession> {
         if (pyodideSession) return pyodideSession
         if (pyodideSessionPromise) return pyodideSessionPromise
         pyodideSessionPromise = import("./pyodide-session").then((mod) => {
             pyodideSession = new mod.PyodideSession(fs)
-            if (currentStdoutWriter) pyodideSession.setStdoutWriter(currentStdoutWriter)
+            if (internals.currentStdoutWriter) pyodideSession.setStdoutWriter(internals.currentStdoutWriter)
             return pyodideSession
         })
         return pyodideSessionPromise
     }
 
-    let currentStdoutWriter: ((data: string) => void) | undefined
+    const internals: BrowserBashSessionInternals = {
+        currentStdoutWriter: undefined,
+        runtimeAdapters: new Set<BrowserBashSessionRuntimeAdapter>(),
+    }
 
     // Build custom commands based on enabled runtimes
     const runtimeCommands: CustomCommand[] = []
-
-    if (options.node) {
-        runtimeCommands.push(
-            defineCommand("node", async (args, ctx) => (await getAlmostNodeSession()).executeNode(args, ctx)),
-            defineCommand("npm", async (args, ctx) => (await getAlmostNodeSession()).executeNpm(args, ctx)),
-        )
-    }
 
     if (options.python) {
         runtimeCommands.push(
@@ -165,23 +160,53 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
         ],
     })
 
-    return {
+    const session: BrowserBashSessionWithInternals = {
         fs,
         bash,
         rootPath,
         cwd: rootPath,
         setStdoutWriter: (writer) => {
-            currentStdoutWriter = writer
-            almostNodeSession?.setStdoutWriter(writer)
+            internals.currentStdoutWriter = writer
+            for (const runtimeAdapter of internals.runtimeAdapters) {
+                runtimeAdapter.setStdoutWriter?.(writer)
+            }
             pyodideSession?.setStdoutWriter(writer)
         },
-        writeStdin: (data) => almostNodeSession?.writeStdin(data),
-        setTerminalSize: (columns, rows) => almostNodeSession?.setTerminalSize(columns, rows),
+        writeStdin: (data) => {
+            for (const runtimeAdapter of internals.runtimeAdapters) {
+                runtimeAdapter.writeStdin?.(data)
+            }
+        },
+        setTerminalSize: (columns, rows) => {
+            for (const runtimeAdapter of internals.runtimeAdapters) {
+                runtimeAdapter.setTerminalSize?.(columns, rows)
+            }
+        },
         dispose: () => {
-            almostNodeSession?.dispose()
+            for (const runtimeAdapter of internals.runtimeAdapters) {
+                runtimeAdapter.dispose?.()
+            }
             pyodideSession?.dispose()
         },
+        [BROWSER_BASH_SESSION_INTERNALS]: internals,
     }
+
+    return session
+}
+
+export function attachBrowserBashSessionRuntimeAdapter(
+    session: BrowserBashSession,
+    runtimeAdapter: BrowserBashSessionRuntimeAdapter,
+): void {
+    const sessionWithInternals = session as BrowserBashSessionWithInternals
+    const internals = sessionWithInternals[BROWSER_BASH_SESSION_INTERNALS]
+
+    if (!internals) {
+        throw new Error("Expected createBrowserBashSession() session")
+    }
+
+    internals.runtimeAdapters.add(runtimeAdapter)
+    runtimeAdapter.setStdoutWriter?.(internals.currentStdoutWriter)
 }
 
 /** Execute a bash command and return a ToolResult */

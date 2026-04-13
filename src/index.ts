@@ -1,4 +1,4 @@
-export const AGENT_WEB_OS_VERSION = "0.3.1"
+export const AGENT_WEB_OS_VERSION = "0.4.0"
 console.log(`[agent-web-os] v${AGENT_WEB_OS_VERSION}`)
 
 export {
@@ -23,7 +23,3 @@ export type { ToolResult } from "./types"
 // Re-export just-bash/browser symbols so consumers don't need just-bash directly
 export { Bash, defineCommand } from "just-bash/browser"
 export type { CommandContext, ExecResult, CustomCommand } from "just-bash/browser"
-
-// Re-export server-bridge utilities (lazy-loaded to avoid pulling almostnode into the main chunk)
-import { getServerBridge, resetServerBridge, type ServerBridge } from "./server-bridge"
-export { getServerBridge, resetServerBridge, type ServerBridge }

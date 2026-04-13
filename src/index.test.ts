@@ -9,8 +9,6 @@ import {
     createBrowserBashSession,
     executeBrowserBash,
     DEFAULT_BASH_SHELL_ENV,
-    getServerBridge,
-    resetServerBridge,
     Bash,
     defineCommand,
 } from "./index"
@@ -37,14 +35,6 @@ describe("index exports", () => {
     it("exports DEFAULT_BASH_SHELL_ENV", () => {
         expect(DEFAULT_BASH_SHELL_ENV).toBeDefined()
         expect(typeof DEFAULT_BASH_SHELL_ENV).toBe("object")
-    })
-
-    it("exports getServerBridge", () => {
-        expect(typeof getServerBridge).toBe("function")
-    })
-
-    it("exports resetServerBridge", () => {
-        expect(typeof resetServerBridge).toBe("function")
     })
 
     it("re-exports Bash from just-bash", () => {

@@ -19,7 +19,7 @@ let almostnodePromise: Promise<{ getServerBridge(): ServerBridge; resetServerBri
 
 function loadAlmostnode() {
     if (!almostnodePromise) {
-        almostnodePromise = import("almostnode") as Promise<{ getServerBridge(): ServerBridge; resetServerBridge(): void }>
+        almostnodePromise = import("almostnode/server-bridge") as Promise<{ getServerBridge(): ServerBridge; resetServerBridge(): void }>
     }
     return almostnodePromise
 }

@@ -1,6 +1,6 @@
 {
     "name": "agent-web-os",
-    "version": "0.3.1",
+    "version": "0.4.0",
     "description": "Browser-based bash + Node.js runtime with an observable in-memory filesystem",
     "type": "module",
     "main": "./dist/index.cjs",
@@ -11,6 +11,11 @@
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js",
             "require": "./dist/index.cjs"
+        },
+        "./node": {
+            "types": "./dist/node.d.ts",
+            "import": "./dist/node.js",
+            "require": "./dist/node.cjs"
         },
         "./__sw__.js": "./dist/__sw__.js"
     },
