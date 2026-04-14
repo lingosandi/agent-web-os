@@ -7,7 +7,8 @@ const pagesBase = process.env.GITHUB_ACTIONS && repoName ? `/${repoName}/` : '/'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: pagesBase,
+  // base: pagesBase,
+  base:'/agent-web-os/'
   plugins: [
     react(),
     babel({ presets: [reactCompilerPreset()] })
