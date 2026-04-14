@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config"
 import path from "path"
 
 export default defineConfig({
-    base:'/agent-web-os',
+    base:'/',
     test: {
         include: ["src/**/*.test.ts"],
     },
