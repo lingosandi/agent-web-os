@@ -2,6 +2,8 @@
 
 **[English](./README.md)** | **[中文](./README.zh-CN.md)**
 
+**官方网站 & 在线演示：[agent-web-os.xyz](https://agent-web-os.xyz/)**
+
 基于浏览器的 AI Agent 操作系统。完整的 Bash Shell、Node.js 运行时和 Python 3.11 执行环境。可观测的内存文件系统。无需服务器。
 
 ## 安装

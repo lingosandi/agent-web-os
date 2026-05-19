@@ -2,6 +2,8 @@
 
 **[English](./README.md)** | **[中文](./README.zh-CN.md)**
 
+**Website & Live Demo: [agent-web-os.xyz](https://agent-web-os.xyz/)**
+
 A browser-based operating system for AI agents. Full Bash shell, Node.js runtime, and Python 3.11 execution. Observable in-memory filesystem. No server required.
 
 ## Install
