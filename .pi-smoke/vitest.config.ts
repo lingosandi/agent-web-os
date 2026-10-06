@@ -6,7 +6,7 @@ import path from "path"
 export default defineConfig({
     test: {
         setupFiles: [path.resolve(__dirname, "setup.ts")],
-        include: [".pi-smoke/**/*.test.ts"],
+        include: ["**/.pi-smoke/**/*.test.ts"],
         testTimeout: 600_000,
         hookTimeout: 600_000,
         pool: "forks",
