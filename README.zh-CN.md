@@ -30,6 +30,25 @@ export async function runAgentWebOsDemo() {
 }
 ```
 
+### Python / Pyodide 版本
+
+`python: true` 会从 jsdelivr CDN 懒加载 Pyodide（默认 `0.29.5`，CPython
+3.13）。如需固定其他版本或使用自托管副本，传入 `pyodideVersion` 或完整的
+`pyodideBaseUrl`：
+
+```ts
+const session = createBrowserBashSession({
+    rootPath: "/workspace",
+    python: true,
+    pyodideVersion: "0.27.7",
+    // 或者：pyodideBaseUrl: "https://your-host/pyodide/v0.29.5/full/"
+})
+```
+
+注意：Pyodide ≥ 0.28 才接受 `pyodide_2025_0` 标签的 wheel，≥ 0.29.4 额外接受
+`pyemscripten_*` 标签（所有已发布的 OCP.wasm / cadquery-OCP 构建均使用这些
+标签）。在 0.27.x 上 micropip 会拒绝这些标签。
+
 ## xterm 集成
 
 单独安装 xterm，将其挂载到 DOM 节点，将 stdout 映射到终端，并将按键输入发送到 `writeStdin` 以支持交互式工具。

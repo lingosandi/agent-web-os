@@ -2,11 +2,14 @@ import type { CommandContext, ExecResult } from "just-bash/browser"
 import { ObservableInMemoryFs } from "./observable-in-memory-fs"
 
 /**
- * Pyodide version loaded from CDN.
- * Update this when upgrading to a newer Pyodide release.
+ * Pyodide version loaded from the CDN by default.
+ * 0.29.x keeps Python 3.13 and accepts both `pyodide_*` and (since 0.29.4)
+ * `pyemscripten_*` wheel platform tags, which every published OCP.wasm /
+ * cadquery-OCP wheel uses — micropip rejects those on 0.27.x.
+ * Override per-session via `pyodideVersion` if you need another line.
  */
-const PYODIDE_VERSION = "0.27.7"
-const PYODIDE_CDN_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`
+const DEFAULT_PYODIDE_VERSION = "0.29.5"
+const DEFAULT_PYODIDE_CDN_URL = `https://cdn.jsdelivr.net/pyodide/v${DEFAULT_PYODIDE_VERSION}/full/`
 
 const PYTHON_VERSION = "3.13"
 
@@ -138,8 +141,19 @@ export class PyodideSession {
     private pyodide: PyodideAPI | null = null
     private initPromise: Promise<void> | null = null
     private stdoutWriter?: (data: string) => void
+    private readonly cdnUrl: string
 
-    constructor(private readonly fs: ObservableInMemoryFs) {}
+    constructor(
+        private readonly fs: ObservableInMemoryFs,
+        options: { pyodideVersion?: string; pyodideBaseUrl?: string } = {},
+    ) {
+        this.cdnUrl =
+            options.pyodideBaseUrl ??
+            (options.pyodideVersion
+                ? `https://cdn.jsdelivr.net/pyodide/v${options.pyodideVersion}/full/`
+                : DEFAULT_PYODIDE_CDN_URL)
+    }
+
 
     private async ensureInitialized(): Promise<void> {
         if (this.pyodide) return
@@ -151,11 +165,11 @@ export class PyodideSession {
         this.initPromise = (async () => {
             const { loadPyodide } = await import(
                 /* webpackIgnore: true */
-                `${PYODIDE_CDN_URL}pyodide.mjs`
+                `${this.cdnUrl}pyodide.mjs`
             ) as { loadPyodide: (opts?: Record<string, unknown>) => Promise<PyodideAPI> }
 
             this.pyodide = await loadPyodide({
-                indexURL: PYODIDE_CDN_URL,
+                indexURL: this.cdnUrl,
                 packages: ["micropip"],
             })
 

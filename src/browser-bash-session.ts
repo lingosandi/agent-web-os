@@ -58,6 +58,14 @@ type BrowserBashSessionOptions = {
     fsOptions?: ObservableInMemoryFsOptions
     /** Enable Python runtime via Pyodide (python, python3, pip commands). Lazy-loaded on first use. (default: false) */
     python?: boolean
+    /**
+     * Pyodide version to load from the CDN (default: "0.29.5"). Ignored when
+     * `pyodideBaseUrl` is set. Must be a line whose CPython matches the
+     packages you expect micropip to resolve (0.28+/0.29 = Python 3.13).
+     */
+    pyodideVersion?: string
+    /** Full base URL of a Pyodide distribution to load instead of the CDN (must end with "/"). (default: jsdelivr CDN at `pyodideVersion`) */
+    pyodideBaseUrl?: string
     /** Additional custom commands to register alongside the built-in commands */
     customCommands?: CustomCommand[]
 }
@@ -127,7 +135,10 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
         if (pyodideSessionPromise) return pyodideSessionPromise
         pyodideSessionPromise = import("./pyodide-session")
             .then((mod) => {
-                pyodideSession = new mod.PyodideSession(fs)
+                pyodideSession = new mod.PyodideSession(fs, {
+                    pyodideVersion: options.pyodideVersion,
+                    pyodideBaseUrl: options.pyodideBaseUrl,
+                })
                 if (internals.currentStdoutWriter) pyodideSession.setStdoutWriter(internals.currentStdoutWriter)
                 return pyodideSession
             })
