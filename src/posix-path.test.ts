@@ -26,9 +26,9 @@ describe("posixPath.normalize", () => {
         expect(posixPath.normalize("/foo/bar/baz/../../qux")).toBe("/foo/qux")
     })
 
-    it("handles double dots at the root", () => {
-        // Implementation keeps .. when there's nothing to pop
-        expect(posixPath.normalize("/..")).toBe("/..")
+    it("clamps double dots at the root (POSIX: /.. === /)", () => {
+        expect(posixPath.normalize("/..")).toBe("/")
+        expect(posixPath.normalize("/../foo")).toBe("/foo")
     })
 
     it("handles relative paths with double dots", () => {

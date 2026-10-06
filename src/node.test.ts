@@ -79,4 +79,17 @@ describe("enableNode", () => {
         expect(nodeResult.success).toBe(true)
         expect(customResult.stdout?.trim()).toBe("hello")
     })
+
+    it("attaches a fresh adapter when re-enabled after session dispose", async () => {
+        const session = await createNodeBrowserBashSession()
+        session.dispose()
+
+        // Old behavior: enableNode was a silent no-op on the disposed
+        // session (WeakSet never cleared), leaving node/npm dead.
+        await enableNode(session)
+        const result = await executeBrowserBash(session, "node --version")
+
+        expect(result.success).toBe(true)
+        expect(result.stdout).toContain("v")
+    })
 })

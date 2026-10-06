@@ -1,0 +1,5 @@
+fetch FAILED: AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+  assert(dispatcher)
+
+defineProperty patched: true

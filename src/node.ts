@@ -3,11 +3,13 @@ import { AlmostNodeSession } from "./almostnode-session"
 import {
     attachBrowserBashSessionRuntimeAdapter,
     createBrowserBashSession,
+    detachBrowserBashSessionRuntimeAdapter,
     type BrowserBashSession,
+    type BrowserBashSessionRuntimeAdapter,
 } from "./browser-bash-session"
 import { getServerBridge, resetServerBridge, type ServerBridge } from "./server-bridge"
 
-const enabledNodeSessions = new WeakSet<BrowserBashSession>()
+const enabledNodeAdapters = new WeakMap<BrowserBashSession, BrowserBashSessionRuntimeAdapter>()
 
 export type NodeBrowserBashSessionOptions = {
     rootPath?: string
@@ -18,7 +20,8 @@ export type NodeBrowserBashSessionOptions = {
 }
 
 export async function enableNode(session: BrowserBashSession): Promise<BrowserBashSession> {
-    if (enabledNodeSessions.has(session)) {
+    const existingAdapter = enabledNodeAdapters.get(session)
+    if (existingAdapter) {
         return session
     }
 
@@ -30,12 +33,20 @@ export async function enableNode(session: BrowserBashSession): Promise<BrowserBa
         session.bash.registerCommand(defineCommand(name, handler))
     })
 
-    attachBrowserBashSessionRuntimeAdapter(session, {
+    const adapter: BrowserBashSessionRuntimeAdapter = {
         setStdoutWriter: (writer) => almostNodeSession.setStdoutWriter(writer),
         writeStdin: (data) => almostNodeSession.writeStdin(data),
         setTerminalSize: (columns, rows) => almostNodeSession.setTerminalSize(columns, rows),
-        dispose: () => almostNodeSession.dispose(),
-    })
+        dispose: () => {
+            almostNodeSession.dispose()
+            // Detach so later setStdoutWriter/writeStdin calls don't hit a
+            // disposed session, and enableNode() can attach a fresh one.
+            detachBrowserBashSessionRuntimeAdapter(session, adapter)
+            enabledNodeAdapters.delete(session)
+        },
+    }
+    attachBrowserBashSessionRuntimeAdapter(session, adapter)
+    enabledNodeAdapters.set(session, adapter)
 
     session.bash.registerCommand(
         defineCommand("node", executeNode),
@@ -44,7 +55,6 @@ export async function enableNode(session: BrowserBashSession): Promise<BrowserBa
         defineCommand("npm", executeNpm),
     )
 
-    enabledNodeSessions.add(session)
     return session
 }
 

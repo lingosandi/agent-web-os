@@ -292,7 +292,9 @@ function normalizePath(inputPath: string): string {
 }
 
 function isInternalAlmostNodePath(targetPath: string): boolean {
-    const normalizedPath = normalizePath(targetPath)
+    // Strip trailing slashes so "/.almostnode/" is recognized as the internal
+    // root itself rather than escaping the prefix check and being mirrored.
+    const normalizedPath = normalizePath(targetPath).replace(/\/+$/, "") || "/"
     return normalizedPath === ALMOSTNODE_INTERNAL_ROOT
         || normalizedPath.startsWith(`${ALMOSTNODE_INTERNAL_ROOT}/`)
 }
@@ -441,10 +443,40 @@ export class AlmostNodeSession {
     private initializePromise: Promise<void> | null = null
     private initialized = false
     private pendingOperations = new Set<Promise<void>>()
+    // Ref-counted console silencing: node processes silence the shared
+    // `console` while running, but overlapping executions must not capture
+    // each other's no-op replacements as "previous" values (which would
+    // permanently silence the console after both finish).
+    private static readonly silencedConsoleMethods = ["log", "info", "warn", "error", "debug", "trace", "dir", "table"] as const
+    private static consoleSilenceCount = 0
+    private static originalConsole: Record<string, unknown> | null = null
+
+    private static silenceConsole(): void {
+        if (AlmostNodeSession.consoleSilenceCount === 0) {
+            AlmostNodeSession.originalConsole = {}
+            for (const method of AlmostNodeSession.silencedConsoleMethods) {
+                AlmostNodeSession.originalConsole[method] = (console as unknown as Record<string, unknown>)[method]
+                ;(console as unknown as Record<string, unknown>)[method] = () => undefined
+            }
+        }
+        AlmostNodeSession.consoleSilenceCount++
+    }
+
+    private static unsilenceConsole(): void {
+        AlmostNodeSession.consoleSilenceCount = Math.max(0, AlmostNodeSession.consoleSilenceCount - 1)
+        if (AlmostNodeSession.consoleSilenceCount === 0 && AlmostNodeSession.originalConsole) {
+            for (const method of AlmostNodeSession.silencedConsoleMethods) {
+                ;(console as unknown as Record<string, unknown>)[method] = AlmostNodeSession.originalConsole[method]
+            }
+            AlmostNodeSession.originalConsole = null
+        }
+    }
+
     private suppressObservableMirrorCount = 0
     private registeredBinCommands = new Set<string>()
     private binCommandRegistrar?: BinCommandRegistrar
     private batchFileLoader?: BatchFileLoader
+    private _stdinHandlerStack: Array<(data: string) => void> = []
     private stdoutWriter?: (data: string) => void
     private _stdinHandler: ((data: string) => void) | null = null
     private _terminalColumns = 80
@@ -655,12 +687,24 @@ export class AlmostNodeSession {
 
         try {
             const parsed = JSON.parse(raw) as Record<string, unknown>
-            this.parsedPackageJsonCache.set(packageJsonPath, { raw, value: parsed })
+            this.rememberInBoundedCache(this.parsedPackageJsonCache, packageJsonPath, { raw, value: parsed })
             return parsed
         } catch {
-            this.parsedPackageJsonCache.set(packageJsonPath, { raw, value: null })
+            this.rememberInBoundedCache(this.parsedPackageJsonCache, packageJsonPath, { raw, value: null })
             return null
         }
+    }
+
+    /**
+     * Insert into a bounded cache, evicting the oldest entry once the cap is
+     * reached. Keeps long dev sessions from growing these maps without bound.
+     */
+    private rememberInBoundedCache<K, V>(cache: Map<K, V>, key: K, value: V, maxEntries = 512): void {
+        if (cache.size >= maxEntries && !cache.has(key)) {
+            const oldest = cache.keys().next()
+            if (!oldest.done) cache.delete(oldest.value)
+        }
+        cache.set(key, value)
     }
 
     private transformTextWithCache(
@@ -674,7 +718,7 @@ export class AlmostNodeSession {
         }
 
         const transformed = transform(source)
-        this.transformedTextCache.set(cacheKey, { source, transformed })
+        this.rememberInBoundedCache(this.transformedTextCache, cacheKey, { source, transformed })
         return transformed
     }
 
@@ -2063,6 +2107,11 @@ exports.LRUCache = LRUCache;
                         exitCode: 1,
                     }
                 }
+
+                // Installs change the package graph; resolutions cached
+                // from before the install (including fallback guesses) are
+                // now stale.
+                this.resolveBarePkgEntryCache.clear()
                 break
             }
             case "ls":
@@ -2286,10 +2335,14 @@ exports.LRUCache = LRUCache;
             }
         }
 
-        // Forward stdin from the host terminal into process.stdin
-        this._stdinHandler = process.stdin
+        // Forward stdin from the host terminal into process.stdin.
+        // Ref-counted: concurrent node processes each push their handler;
+        // the last one to finish clears the slot instead of the first.
+        const stdinHandler = process.stdin
             ? (data: string) => { process.stdin.emit("data", data) }
             : null
+        if (stdinHandler) this._stdinHandlerStack.push(stdinHandler)
+        this._stdinHandler = stdinHandler
 
         const originalExit = process.exit
         let exitCalled = false
@@ -2299,26 +2352,7 @@ exports.LRUCache = LRUCache;
         const exitPromise = new Promise<number>((resolve) => {
             resolveExit = resolve
         })
-        const previousConsole = {
-            log: console.log,
-            info: console.info,
-            warn: console.warn,
-            error: console.error,
-            debug: console.debug,
-            trace: console.trace,
-            dir: console.dir,
-            table: console.table,
-        }
-
-        console.log = () => undefined
-        console.info = () => undefined
-        console.warn = () => undefined
-        console.error = () => undefined
-        console.debug = () => undefined
-        console.trace = () => undefined
-        console.dir = () => undefined
-        console.table = () => undefined
-
+        AlmostNodeSession.silenceConsole()
         process.exit = ((code = 0) => {
             if (!exitCalled) {
                 exitCalled = true
@@ -2424,19 +2458,16 @@ exports.LRUCache = LRUCache;
                 exitCode: 1,
             }
         } finally {
-            this._stdinHandler = null
+            if (stdinHandler) {
+                const idx = this._stdinHandlerStack.lastIndexOf(stdinHandler)
+                if (idx >= 0) this._stdinHandlerStack.splice(idx, 1)
+                this._stdinHandler = this._stdinHandlerStack[this._stdinHandlerStack.length - 1] ?? null
+            }
             if (canListenForUnhandledRejection) {
                 globalThis.removeEventListener("unhandledrejection", rejectionHandler)
             }
             process.exit = originalExit
-            console.log = previousConsole.log
-            console.info = previousConsole.info
-            console.warn = previousConsole.warn
-            console.error = previousConsole.error
-            console.debug = previousConsole.debug
-            console.trace = previousConsole.trace
-            console.dir = previousConsole.dir
-            console.table = previousConsole.table
+            AlmostNodeSession.unsilenceConsole()
         }
     }
 

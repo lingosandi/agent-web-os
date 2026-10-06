@@ -1,0 +1,16 @@
+simple transform keeps function decl: true
+= getPackageDir();
+    const srcOrDist = existsSync(join(packageDir, "src")) ? "src" : "dist";
+    return join(packageDir, srcOrDist, "core", "export-html");
+}
+/** Get path to package.json */
+exports.getPackageJsonPath = function getPackageJsonPath() {
+    return join(getPackageDir(), "package.json");
+}
+/** Get path to README.md */
+exports.getReadmePath = function getReadmePath() {
+    return resolve(join(getPackageDir(), "README.md"));
+}
+/** Get path to docs directory */
+exports.getDocsPath = f
+line332: const pkg = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8"));

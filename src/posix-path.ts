@@ -13,7 +13,10 @@ function normalize(p: string): string {
         if (seg === ".." && segments.length > 0 && segments[segments.length - 1] !== "..") {
             segments.pop()
         } else if (seg !== "." && seg !== "") {
-            segments.push(seg)
+            // ".." above an absolute root clamps to the root (POSIX: "/.." === "/")
+            if (!(seg === ".." && isAbsolute)) {
+                segments.push(seg)
+            }
         }
     }
 

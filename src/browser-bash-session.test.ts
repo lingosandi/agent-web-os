@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import {
     attachBrowserBashSessionRuntimeAdapter,
+    detachBrowserBashSessionRuntimeAdapter,
     BROWSER_BASH_SESSION_INTERNALS,
     createBrowserBashSession,
     executeBrowserBash,
@@ -151,6 +152,38 @@ describe("createBrowserBashSession", () => {
 
         expect(internals.runtimeAdapters.has(adapter)).toBe(true)
     })
+
+    it("detaches runtime adapters so they no longer receive terminal events", () => {
+        const session = createBrowserBashSession()
+        const adapter = {
+            setStdoutWriter: vi.fn(),
+            writeStdin: vi.fn(),
+        }
+
+        attachBrowserBashSessionRuntimeAdapter(session, adapter)
+        detachBrowserBashSessionRuntimeAdapter(session, adapter)
+        session.writeStdin("input")
+
+        expect(adapter.writeStdin).not.toHaveBeenCalled()
+    })
+
+    it("clears runtime adapters on dispose so post-dispose terminal calls hit nothing", () => {
+        const session = createBrowserBashSession()
+        const adapter = {
+            setStdoutWriter: vi.fn(),
+            writeStdin: vi.fn(),
+            dispose: vi.fn(),
+        }
+
+        attachBrowserBashSessionRuntimeAdapter(session, adapter)
+        session.dispose()
+        expect(() => {
+            session.writeStdin("input")
+            session.setTerminalSize(100, 30)
+        }).not.toThrow()
+        expect(adapter.writeStdin).toHaveBeenCalledTimes(0)
+        expect(adapter.dispose).toHaveBeenCalledTimes(1)
+    })
 })
 
 describe("executeBrowserBash", () => {
@@ -180,6 +213,16 @@ describe("executeBrowserBash", () => {
         expect(result.stdout).toContain("hello")
         expect(result.exit_code).toBe(0)
         expect(result.backend).toBe("just-bash")
+    })
+
+    it("removes the external signal listener after execution completes", async () => {
+        const controller = new AbortController()
+        const spy = vi.spyOn(controller.signal, "removeEventListener")
+
+        await executeBrowserBash(session, "echo done", { signal: controller.signal })
+
+        expect(spy).toHaveBeenCalled()
+        spy.mockRestore()
     })
 
     it("includes duration_ms", async () => {

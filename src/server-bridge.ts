@@ -40,6 +40,12 @@ export async function getServerBridge(): Promise<ServerBridge> {
 }
 
 export function resetServerBridge(): void {
-    almostnodeModule?.resetServerBridge()
+    if (almostnodeModule) {
+        almostnodeModule.resetServerBridge()
+    } else {
+        // Module not loaded yet: clear any in-flight import so a later
+        // getServerBridge() re-imports instead of resurrecting pre-reset state.
+        almostnodePromise = null
+    }
     globalBridge = null
 }

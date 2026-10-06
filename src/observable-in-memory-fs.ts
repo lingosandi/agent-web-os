@@ -398,11 +398,13 @@ export class ObservableInMemoryFs extends InMemoryFs {
     ): Promise<void> {
         if (!this.shouldEmitChanges()) {
             await super.writeFile(path, content, options)
+            this.clearLazyPath(path)
             return
         }
 
         const previous = await readPathState(this, path)
         await this.runWithSuppressedSyncEvents(() => super.writeFile(path, content, options))
+        this.clearLazyPath(path)
         await this.emitWriteEvent(path, previous)
     }
 
@@ -413,11 +415,13 @@ export class ObservableInMemoryFs extends InMemoryFs {
     ): Promise<void> {
         if (!this.shouldEmitChanges()) {
             await super.appendFile(path, content, options)
+            this.clearLazyPath(path)
             return
         }
 
         const previous = await readPathState(this, path)
         await this.runWithSuppressedSyncEvents(() => super.appendFile(path, content, options))
+        this.clearLazyPath(path)
         await this.emitWriteEvent(path, previous)
     }
 

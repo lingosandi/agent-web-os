@@ -54,12 +54,14 @@ interface EmscriptenFS {
 /**
  * Recursively sync files from ObservableInMemoryFs → Pyodide's Emscripten FS.
  * Creates directories as needed and writes all files.
+ * Entries that can't be read are skipped and reported via `warnings`.
  */
 async function syncToEmscriptenFS(
     srcFs: ObservableInMemoryFs,
     emFs: EmscriptenFS,
     srcPath: string,
     emPath: string,
+    warnings: string[],
 ): Promise<void> {
     // Ensure target directory exists in Emscripten FS
     try {
@@ -82,13 +84,13 @@ async function syncToEmscriptenFS(
         try {
             const stat = await srcFs.stat(srcChild)
             if (stat.isDirectory) {
-                await syncToEmscriptenFS(srcFs, emFs, srcChild, emChild)
+                await syncToEmscriptenFS(srcFs, emFs, srcChild, emChild, warnings)
             } else {
                 const content = await srcFs.readFileBuffer(srcChild)
                 emFs.writeFile(emChild, content)
             }
-        } catch {
-            // Skip files that can't be read
+        } catch (error) {
+            warnings.push(`skipped '${srcChild}' during sync to Python: ${error instanceof Error ? error.message : String(error)}`)
         }
     }
 }
@@ -96,12 +98,15 @@ async function syncToEmscriptenFS(
 /**
  * Recursively sync files from Pyodide's Emscripten FS → ObservableInMemoryFs.
  * Only syncs files that differ or are new.
+ * Entries that can't be written back are skipped and reported via `warnings` —
+ * losing a file the user's Python just created must not pass silently.
  */
 async function syncFromEmscriptenFS(
     emFs: EmscriptenFS,
     dstFs: ObservableInMemoryFs,
     emPath: string,
     dstPath: string,
+    warnings: string[],
 ): Promise<void> {
     let entries: string[]
     try {
@@ -118,13 +123,13 @@ async function syncFromEmscriptenFS(
             const stat = emFs.stat(emChild)
             if (emFs.isDir(stat.mode)) {
                 dstFs.mkdirSync(dstChild, { recursive: true })
-                await syncFromEmscriptenFS(emFs, dstFs, emChild, dstChild)
+                await syncFromEmscriptenFS(emFs, dstFs, emChild, dstChild, warnings)
             } else if (emFs.isFile(stat.mode)) {
                 const content = emFs.readFile(emChild) as Uint8Array
                 dstFs.writeFileSync(dstChild, content)
             }
-        } catch {
-            // Skip entries we can't read
+        } catch (error) {
+            warnings.push(`failed to save '${dstChild}' from Python: ${error instanceof Error ? error.message : String(error)}`)
         }
     }
 }
@@ -201,10 +206,14 @@ export class PyodideSession {
 
         // Sync filesystem before execution
         const workspaceRoot = this.getWorkspaceRoot(cwd)
-        await syncToEmscriptenFS(this.fs, pyodide.FS, workspaceRoot, workspaceRoot)
+        const syncWarnings: string[] = []
+        await syncToEmscriptenFS(this.fs, pyodide.FS, workspaceRoot, workspaceRoot, syncWarnings)
 
         let stdout = ""
         let stderr = ""
+        for (const warning of syncWarnings) {
+            stderr += `warning: ${warning}\n`
+        }
 
         pyodide.setStdout({
             batched: (msg: string) => {
@@ -216,6 +225,17 @@ export class PyodideSession {
             batched: (msg: string) => {
                 stderr += msg + "\n"
                 this.stdoutWriter?.(msg + "\n")
+            },
+        })
+        // Set stdin — return piped stdin content on first read, then EOF.
+        // Without this, Pyodide falls back to LegacyReader._getInput which
+        // throws "Illegal invocation" in browser contexts.
+        let stdinRead = false
+        pyodide.setStdin({
+            stdin: () => {
+                if (stdinRead || !ctx.stdin) return null
+                stdinRead = true
+                return ctx.stdin
             },
         })
 
@@ -245,6 +265,11 @@ os.chdir(${JSON.stringify(cwd)})
             }
         }
 
+        // Fresh __main__ namespace per invocation — real CPython starts a
+        // fresh interpreter each run; sharing the default globals leaks
+        // variables, imports and sys.path mutations across invocations.
+        const namespace = pyodide.runPython("dict()") as { destroy(): void }
+        let exitCode = 0
         try {
             // Auto-install any import-able packages
             await pyodide.loadPackagesFromImports(code, {
@@ -253,17 +278,30 @@ os.chdir(${JSON.stringify(cwd)})
                 },
             })
 
-            await pyodide.runPythonAsync(code)
-
-            // Sync filesystem after execution
-            await syncFromEmscriptenFS(pyodide.FS, this.fs, workspaceRoot, workspaceRoot)
-
-            return { stdout, stderr, exitCode: 0 }
+            await pyodide.runPythonAsync(code, { globals: namespace })
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error)
             stderr += errorMsg + "\n"
-            return { stdout, stderr, exitCode: 1 }
+            exitCode = 1
         }
+
+        // Sync filesystem after execution — on the success AND error path, so
+        // files written before a failure are preserved (real Python keeps
+        // partial outputs on non-zero exit).
+        try {
+            const backSyncWarnings: string[] = []
+            await syncFromEmscriptenFS(pyodide.FS, this.fs, workspaceRoot, workspaceRoot, backSyncWarnings)
+            for (const warning of backSyncWarnings) {
+                stderr += `warning: ${warning}\n`
+            }
+        } catch (syncError) {
+            const msg = syncError instanceof Error ? syncError.message : String(syncError)
+            stderr += `warning: failed to sync filesystem changes: ${msg}\n`
+        } finally {
+            namespace.destroy()
+        }
+
+        return { stdout, stderr, exitCode }
     }
 
     async executePip(args: string[], ctx: CommandContext): Promise<ExecResult> {
@@ -300,6 +338,9 @@ os.chdir(${JSON.stringify(cwd)})
                 this.stdoutWriter?.(msg + "\n")
             },
         })
+        // Prevent stdin crash — pip never reads stdin but some packages
+        // might try during install. Return EOF immediately.
+        pyodide.setStdin({ stdin: () => null })
 
         switch (subcommand) {
             case "install": {

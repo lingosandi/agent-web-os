@@ -31,7 +31,7 @@ export type BrowserBashSession = {
     dispose: () => void
 }
 
-type BrowserBashSessionRuntimeAdapter = {
+export type BrowserBashSessionRuntimeAdapter = {
     setStdoutWriter?: (writer: ((data: string) => void) | undefined) => void
     writeStdin?: (data: string) => void
     setTerminalSize?: (columns: number, rows: number) => void
@@ -125,11 +125,18 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
     async function getPyodideSession(): Promise<PyodideSession> {
         if (pyodideSession) return pyodideSession
         if (pyodideSessionPromise) return pyodideSessionPromise
-        pyodideSessionPromise = import("./pyodide-session").then((mod) => {
-            pyodideSession = new mod.PyodideSession(fs)
-            if (internals.currentStdoutWriter) pyodideSession.setStdoutWriter(internals.currentStdoutWriter)
-            return pyodideSession
-        })
+        pyodideSessionPromise = import("./pyodide-session")
+            .then((mod) => {
+                pyodideSession = new mod.PyodideSession(fs)
+                if (internals.currentStdoutWriter) pyodideSession.setStdoutWriter(internals.currentStdoutWriter)
+                return pyodideSession
+            })
+            .catch((error) => {
+                // Clear the poisoned promise so the next invocation can
+                // retry instead of awaiting the same rejection forever.
+                pyodideSessionPromise = null
+                throw error
+            })
         return pyodideSessionPromise
     }
 
@@ -186,7 +193,10 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
             for (const runtimeAdapter of internals.runtimeAdapters) {
                 runtimeAdapter.dispose?.()
             }
+            internals.runtimeAdapters.clear()
             pyodideSession?.dispose()
+            pyodideSession = null
+            pyodideSessionPromise = null
         },
         [BROWSER_BASH_SESSION_INTERNALS]: internals,
     }
@@ -207,6 +217,20 @@ export function attachBrowserBashSessionRuntimeAdapter(
 
     internals.runtimeAdapters.add(runtimeAdapter)
     runtimeAdapter.setStdoutWriter?.(internals.currentStdoutWriter)
+}
+
+export function detachBrowserBashSessionRuntimeAdapter(
+    session: BrowserBashSession,
+    runtimeAdapter: BrowserBashSessionRuntimeAdapter,
+): void {
+    const sessionWithInternals = session as BrowserBashSessionWithInternals
+    const internals = sessionWithInternals[BROWSER_BASH_SESSION_INTERNALS]
+
+    if (!internals) {
+        throw new Error("Expected createBrowserBashSession() session")
+    }
+
+    internals.runtimeAdapters.delete(runtimeAdapter)
 }
 
 /** Execute a bash command and return a ToolResult */
@@ -230,11 +254,12 @@ export async function executeBrowserBash(
         combinedController.abort(reason instanceof Error ? reason : new Error(String(reason ?? "Command aborted")))
     }
 
+    const externalAbortListener = () => abort(options.signal!.reason)
     if (options.signal) {
         if (options.signal.aborted) {
             abort(options.signal.reason)
         } else {
-            options.signal.addEventListener("abort", () => abort(options.signal!.reason), { once: true })
+            options.signal.addEventListener("abort", externalAbortListener, { once: true })
         }
     }
 
@@ -278,5 +303,6 @@ export async function executeBrowserBash(
         return { success: false, command: trimmedCommand, error: message, stderr: message, exit_code: 1, duration_ms: Date.now() - startedAt, backend: "just-bash" }
     } finally {
         globalThis.clearTimeout(timeoutId)
+        options.signal?.removeEventListener("abort", externalAbortListener)
     }
 }
