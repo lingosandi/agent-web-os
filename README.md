@@ -30,6 +30,25 @@ export async function runAgentWebOsDemo() {
 }
 ```
 
+### Python / Pyodide version
+
+`python: true` lazily loads Pyodide from the jsdelivr CDN (default `0.29.5`,
+CPython 3.13). To pin another line or serve your own copy, pass
+`pyodideVersion` or a full `pyodideBaseUrl`:
+
+```ts
+const session = createBrowserBashSession({
+    rootPath: "/workspace",
+    python: true,
+    pyodideVersion: "0.27.7",
+    // or: pyodideBaseUrl: "https://your-host/pyodide/v0.29.5/full/"
+})
+```
+
+Note: Pyodide ≥ 0.28 accepts `pyodide_2025_0`-tagged wheels, and ≥ 0.29.4
+additionally accepts `pyemscripten_*`-tagged wheels (all published OCP.wasm /
+cadquery-OCP builds). On 0.27.x micropip rejects those tags.
+
 ## xterm Integration
 
 Install xterm separately, attach it to your DOM node, mirror stdout into the terminal, and send keystrokes into `writeStdin` for interactive tools.
