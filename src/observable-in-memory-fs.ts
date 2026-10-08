@@ -119,6 +119,7 @@ export class ObservableInMemoryFs extends InMemoryFs {
     private suppressChangeEmissionCount = 0
     private readonly consoleLogChanges: boolean
     private readonly isLoggableWorkspacePath: (fsPath: string) => boolean
+    private readonly pendingChangeEmissions = new Set<Promise<void>>()
 
     constructor(options?: ObservableInMemoryFsOptions) {
         super()
@@ -197,9 +198,23 @@ export class ObservableInMemoryFs extends InMemoryFs {
     }
 
     private queueChangeEmission(emission: Promise<void>): void {
-        void emission.catch((error: unknown) => {
+        // Track queued emissions so callers can deterministically wait for
+        // every event a synchronous mutation will produce (used by the
+        // almostnode sync adapter to scope its echo-suppression window).
+        const tracked = emission.catch((error: unknown) => {
             console.error("[ObservableInMemoryFs] Failed to emit change event", error)
         })
+        this.pendingChangeEmissions.add(tracked)
+        void tracked.finally(() => {
+            this.pendingChangeEmissions.delete(tracked)
+        })
+    }
+
+    /** Resolves once every change event queued so far has been emitted. */
+    async settleChangeEmissions(): Promise<void> {
+        while (this.pendingChangeEmissions.size > 0) {
+            await Promise.all(Array.from(this.pendingChangeEmissions))
+        }
     }
 
     private areConsoleLogsSuppressed(): boolean {

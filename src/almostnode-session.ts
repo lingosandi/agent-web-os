@@ -398,7 +398,7 @@ class AlmostNodeVirtualFs extends VirtualFS {
         super.writeFileSync(targetPath, data)
 
         if (this.shouldMirror(targetPath)) {
-            void this.session.applyVirtualWrite(targetPath, data)
+            this.session.mirrorWriteSync(targetPath, data)
         }
     }
 
@@ -406,7 +406,7 @@ class AlmostNodeVirtualFs extends VirtualFS {
         super.mkdirSync(targetPath, options)
 
         if (this.shouldMirror(targetPath)) {
-            void this.session.applyVirtualMkdir(targetPath)
+            this.session.mirrorMkdirSync(targetPath)
         }
     }
 
@@ -414,7 +414,7 @@ class AlmostNodeVirtualFs extends VirtualFS {
         super.unlinkSync(targetPath)
 
         if (this.shouldMirror(targetPath)) {
-            void this.session.applyVirtualRemove(targetPath, false)
+            this.session.mirrorRemoveSync(targetPath, false)
         }
     }
 
@@ -422,7 +422,7 @@ class AlmostNodeVirtualFs extends VirtualFS {
         super.rmdirSync(targetPath)
 
         if (this.shouldMirror(targetPath)) {
-            void this.session.applyVirtualRemove(targetPath, true)
+            this.session.mirrorRemoveSync(targetPath, true)
         }
     }
 
@@ -430,7 +430,7 @@ class AlmostNodeVirtualFs extends VirtualFS {
         super.renameSync(previousPath, nextPath)
 
         if (this.shouldMirror(previousPath) && this.shouldMirror(nextPath)) {
-            void this.session.applyVirtualRename(previousPath, nextPath)
+            this.session.mirrorRenameSync(previousPath, nextPath)
         }
     }
 }
@@ -443,6 +443,10 @@ export class AlmostNodeSession {
     private initializePromise: Promise<void> | null = null
     private initialized = false
     private pendingOperations = new Set<Promise<void>>()
+    // Serialized hub mirror operations (rm/mv have no sync API on the
+    // observable FS). FIFO order prevents rename→unlink / write→unlink races.
+    private mirrorChainTail: Promise<void> = Promise.resolve()
+    private mirrorChainDepth = 0
     // Ref-counted console silencing: node processes silence the shared
     // `console` while running, but overlapping executions must not capture
     // each other's no-op replacements as "previous" values (which would
@@ -1529,8 +1533,11 @@ exports.LRUCache = LRUCache;
     }
 
     private async flushPendingOperations(): Promise<void> {
-        while (this.pendingOperations.size > 0) {
-            await Promise.all(Array.from(this.pendingOperations))
+        while (this.pendingOperations.size > 0 || this.mirrorChainDepth > 0) {
+            await Promise.all([
+                ...Array.from(this.pendingOperations),
+                this.mirrorChainTail,
+            ])
         }
     }
 
@@ -1716,59 +1723,103 @@ exports.LRUCache = LRUCache;
         await this.hydrateObservablePathsIntoVirtualFs(projectPaths)
     }
 
-    async applyVirtualWrite(targetPath: string, data: string | Uint8Array): Promise<void> {
-        return this.trackOperation((async () => {
-            const normalizedPath = normalizePath(targetPath)
-            if (isInternalAlmostNodePath(normalizedPath)) {
-                return
-            }
+    /**
+     * Internal seam used by AlmostNodeVirtualFs. Writes land in the observable
+     * FS synchronously (so no settle/flush is needed to observe them). The
+     * echo-suppression window covers exactly the hub change events this write
+     * queues — third-party subscribers still see them.
+     */
+    mirrorWriteSync(targetPath: string, data: string | Uint8Array): void {
+        const normalizedPath = normalizePath(targetPath)
+        if (isInternalAlmostNodePath(normalizedPath)) {
+            return
+        }
 
-            await this.withSuppressedObservableMirroring(async () => {
-                await ensureObservableDirectory(this.fs, path.dirname(normalizedPath))
-                await this.fs.writeFile(normalizedPath, data)
-            })
-        })())
+        if (this.mirrorChainDepth > 0) {
+            // Keep strict ordering with previously queued removals/moves.
+            this.enqueueMirrorOperation(() => this.withSuppressedObservableMirroring(
+                async () => { this.applyHubWriteSync(normalizedPath, data) },
+            ))
+            return
+        }
+
+        this.suppressObservableMirrorCount += 1
+        void this.fs.settleChangeEmissions().then(() => {
+            this.suppressObservableMirrorCount -= 1
+        })
+        this.applyHubWriteSync(normalizedPath, data)
     }
 
-    async applyVirtualMkdir(targetPath: string): Promise<void> {
-        return this.trackOperation((async () => {
-            const normalizedPath = normalizePath(targetPath)
-            if (isInternalAlmostNodePath(normalizedPath)) {
-                return
-            }
+    /** Internal seam used by AlmostNodeVirtualFs. Mirrors a mkdir synchronously. */
+    mirrorMkdirSync(targetPath: string): void {
+        const normalizedPath = normalizePath(targetPath)
+        if (isInternalAlmostNodePath(normalizedPath)) {
+            return
+        }
 
-            await this.withSuppressedObservableMirroring(async () => {
-                await this.fs.mkdir(normalizedPath, { recursive: true })
-            })
-        })())
+        if (this.mirrorChainDepth > 0) {
+            this.enqueueMirrorOperation(() => this.withSuppressedObservableMirroring(
+                async () => { this.fs.mkdirSync(normalizedPath, { recursive: true }) },
+            ))
+            return
+        }
+
+        this.suppressObservableMirrorCount += 1
+        void this.fs.settleChangeEmissions().then(() => {
+            this.suppressObservableMirrorCount -= 1
+        })
+        this.fs.mkdirSync(normalizedPath, { recursive: true })
     }
 
-    async applyVirtualRemove(targetPath: string, recursive: boolean): Promise<void> {
-        return this.trackOperation((async () => {
-            const normalizedPath = normalizePath(targetPath)
-            if (isInternalAlmostNodePath(normalizedPath)) {
-                return
-            }
+    /**
+     * Internal seam used by AlmostNodeVirtualFs. Removals run through the
+     * ordered mirror chain so rename→unlink / write→unlink sequences can
+     * never interleave.
+     */
+    mirrorRemoveSync(targetPath: string, recursive: boolean): void {
+        const normalizedPath = normalizePath(targetPath)
+        if (isInternalAlmostNodePath(normalizedPath)) {
+            return
+        }
 
-            await this.withSuppressedObservableMirroring(async () => {
-                await this.fs.rm(normalizedPath, { force: true, recursive })
-            })
-        })())
+        this.enqueueMirrorOperation(() => this.withSuppressedObservableMirroring(async () => {
+            await this.fs.rm(normalizedPath, { force: true, recursive })
+        }))
     }
 
-    async applyVirtualRename(previousPath: string, nextPath: string): Promise<void> {
-        return this.trackOperation((async () => {
-            const normalizedPreviousPath = normalizePath(previousPath)
-            const normalizedNextPath = normalizePath(nextPath)
-            if (isInternalAlmostNodePath(normalizedPreviousPath) || isInternalAlmostNodePath(normalizedNextPath)) {
-                return
-            }
+    /** Internal seam used by AlmostNodeVirtualFs. Renames run through the ordered mirror chain. */
+    mirrorRenameSync(previousPath: string, nextPath: string): void {
+        const normalizedPreviousPath = normalizePath(previousPath)
+        const normalizedNextPath = normalizePath(nextPath)
+        if (isInternalAlmostNodePath(normalizedPreviousPath) || isInternalAlmostNodePath(normalizedNextPath)) {
+            return
+        }
 
-            await this.withSuppressedObservableMirroring(async () => {
-                await ensureObservableDirectory(this.fs, path.dirname(normalizedNextPath))
-                await this.fs.mv(normalizedPreviousPath, normalizedNextPath)
-            })
-        })())
+        this.enqueueMirrorOperation(() => this.withSuppressedObservableMirroring(async () => {
+            await ensureObservableDirectory(this.fs, path.dirname(normalizedNextPath))
+            await this.fs.mv(normalizedPreviousPath, normalizedNextPath)
+        }))
+    }
+
+    private applyHubWriteSync(normalizedPath: string, data: string | Uint8Array): void {
+        this.fs.mkdirSync(path.dirname(normalizedPath), { recursive: true })
+        this.fs.writeFileSync(normalizedPath, data)
+    }
+
+    /**
+     * Serialize hub mirror operations that cannot be applied synchronously
+     * (rm/mv have no sync API). Strict FIFO order prevents the rename→unlink
+     * and write→unlink races the old fire-and-forget mirroring had.
+     */
+    private enqueueMirrorOperation(operation: () => Promise<unknown>): void {
+        this.mirrorChainDepth += 1
+        this.mirrorChainTail = this.mirrorChainTail.then(operation).then(
+            () => { this.mirrorChainDepth -= 1 },
+            (error: unknown) => {
+                this.mirrorChainDepth -= 1
+                console.error("[AlmostNodeSession] mirror operation failed", error)
+            },
+        )
     }
 
     private async ensureInitialized(): Promise<void> {
