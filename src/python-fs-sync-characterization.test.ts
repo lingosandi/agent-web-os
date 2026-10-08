@@ -40,6 +40,10 @@ let nextNodeId = 1
 /** Minimal Emscripten-shaped primitives: FSNode creation + mode tests. */
 const primitives: WorkspaceFsPrimitives = {
     createNode(parent, name, mode) {
+        // Mirror MEMFS createNode: refuse to shadow an existing entry.
+        if (parent && (parent.contents as Record<string, WorkspaceFsNode>)[name]) {
+            throw new FakeErrnoError(WORKSPACE_FS_ERRNO.EEXIST)
+        }
         const node: WorkspaceFsNode = {
             id: nextNodeId++,
             name,
@@ -105,9 +109,16 @@ class MountDriver {
         node.node_ops!.setattr(node, attr)
     }
 
-    /** open(O_CREAT) + write + close, the way FS.writeFile drives streams */
+    /** open(O_CREAT) + write + close, the way FS.writeFile drives streams.
+     *  An existing node is opened (lookup) — FS core only mknods on ENOENT. */
     writeFile(parent: WorkspaceFsNode, name: string, data: Uint8Array): void {
-        const fileNode = this.mknod(parent, name, 0x81b4)
+        let fileNode: WorkspaceFsNode | null = null
+        try {
+            fileNode = this.lookup(parent, name)
+        } catch {
+            // ENOENT — create it
+        }
+        if (!fileNode) fileNode = this.mknod(parent, name, 0x81b4)
         const stream = { node: fileNode, position: 0, fd: 1, flags: 0 }
         fileNode.stream_ops!.write(stream, data, 0, data.byteLength, null)
         stream.position += data.byteLength
@@ -207,6 +218,26 @@ describe("characterization: Python workspace write-through mount", () => {
 
         expect(hub.isPathLazy("/workspace/lazy.txt")).toBe(false)
         expect(driver.readAll(driver.lookup(driver.root, "lazy.txt"))).toEqual(new TextEncoder().encode("lazy-content"))
+    })
+
+    it("rebuildSkeleton re-creates the node when the hub turned a file into a directory", async () => {
+        hub.mkdirSync("/workspace", { recursive: true })
+        await hub.writeFile("/workspace/thing.bin", "old-bytes")
+
+        await mount.rebuildSkeleton([])
+
+        // Hub-side file→dir conversion (e.g. the shell ran `mkdir thing.bin`).
+        await hub.rm("/workspace/thing.bin", { force: true })
+        await hub.mkdir("/workspace/thing.bin", { recursive: true })
+        await hub.writeFile("/workspace/thing.bin/inner.txt", "now-a-dir")
+
+        const warnings: string[] = []
+        await mount.rebuildSkeleton(warnings)
+        expect(warnings).toEqual([])
+
+        const dirNode = driver.lookup(driver.root, "thing.bin")
+        expect(primitives.isDir(dirNode.mode)).toBe(true)
+        expect(driver.readAll(driver.lookup(dirNode, "inner.txt"))).toEqual(new TextEncoder().encode("now-a-dir"))
     })
 
     it("rebuildSkeleton skips unreadable entries with a warning", async () => {

@@ -30,7 +30,7 @@ const PIP_USAGE = [
  * Minimal type for the Pyodide API surface we use.
  * We dynamically import pyodide from CDN so there's no compile-time package.
  */
-interface PyodideAPI {
+export interface PyodideAPI {
     version: string
     FS: EmscriptenFS
     runPython(code: string, options?: { globals?: unknown }): unknown
@@ -75,6 +75,21 @@ export class PyodideSession {
     }
 
 
+    /** Loads the pyodide runtime. Protected seam — tests override this with
+     *  a fake runtime to exercise the initialization lifecycle without the
+     *  real WASM interpreter. */
+    protected async createRuntime(): Promise<PyodideAPI> {
+        const { loadPyodide } = await import(
+            /* webpackIgnore: true */
+            `${this.cdnUrl}pyodide.mjs`
+        ) as { loadPyodide: (opts?: Record<string, unknown>) => Promise<PyodideAPI> }
+
+        return loadPyodide({
+            indexURL: this.cdnUrl,
+            packages: ["micropip"],
+        })
+    }
+
     private async ensureInitialized(): Promise<void> {
         if (this.pyodide) return
         if (this.initPromise) {
@@ -83,22 +98,28 @@ export class PyodideSession {
         }
 
         this.initPromise = (async () => {
-            const { loadPyodide } = await import(
-                /* webpackIgnore: true */
-                `${this.cdnUrl}pyodide.mjs`
-            ) as { loadPyodide: (opts?: Record<string, unknown>) => Promise<PyodideAPI> }
+            this.pyodide = await this.createRuntime()
 
-            this.pyodide = await loadPyodide({
-                indexURL: this.cdnUrl,
-                packages: ["micropip"],
-            })
+            // Stale mounts from a previous interpreter lifecycle (dispose +
+            // re-init) bound the old WASM FS's node objects — drop them so
+            // every root is re-created against the new interpreter.
+            this.workspaceMounts.clear()
 
             // Default workspace mount — other roots are mounted lazily by
             // ensureWorkspaceMount when a run's cwd demands them.
             this.ensureWorkspaceMount("/workspace")
         })()
 
-        await this.initPromise
+        try {
+            await this.initPromise
+        } catch (error) {
+            // Retry the next invocation instead of caching the rejection
+            // (e.g. a transient CDN failure would otherwise poison every
+            // future python command in the session).
+            this.initPromise = null
+            this.pyodide = null
+            throw error
+        }
     }
 
     /**

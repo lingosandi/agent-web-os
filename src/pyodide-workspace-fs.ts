@@ -477,6 +477,10 @@ export class WorkspaceMount {
                 if (stat.isDirectory) {
                     let child = existing[entry]
                     if (!child || !this.primitives.isDir(child.mode)) {
+                        // Wrong-typed surviving node (hub changed its type
+                        // between runs) would make MEMFS createNode throw
+                        // EEXIST — drop it and re-create the dir node.
+                        if (child) delete existing[entry]
                         child = this.mknod(dirNode, entry, DIR_MODE, 0)
                         // The hub directory already exists; mkdirSync is
                         // idempotent for it.
@@ -486,6 +490,7 @@ export class WorkspaceMount {
                 } else {
                     let child = existing[entry]
                     if (!child || !this.primitives.isFile(child.mode)) {
+                        if (child) delete existing[entry]
                         child = this.primitives.createNode(dirNode, entry, FILE_MODE, 0)
                         child.hubPath = childPath
                         child.usedBytes = 0
