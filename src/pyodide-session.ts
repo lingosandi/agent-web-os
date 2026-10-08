@@ -1,4 +1,6 @@
+import type { WorkspaceFsNode, WorkspaceFsType } from "./pyodide-workspace-fs"
 import type { CommandContext, ExecResult } from "just-bash/browser"
+import { WorkspaceMount, createWorkspaceMount, emscriptenPrimitives } from "./pyodide-workspace-fs"
 import { ObservableInMemoryFs } from "./observable-in-memory-fs"
 
 /**
@@ -41,104 +43,22 @@ interface PyodideAPI {
     globals: { get(name: string): unknown }
 }
 
-/** Minimal Emscripten FS type surface */
-interface EmscriptenFS {
-    mkdir(path: string): void
-    writeFile(path: string, data: string | Uint8Array, opts?: { encoding?: string }): void
-    readFile(path: string, opts?: { encoding?: string }): string | Uint8Array
-    readdir(path: string): string[]
-    stat(path: string): { mode: number; size: number }
-    unlink(path: string): void
-    rmdir(path: string): void
+/** Minimal Pyodide FS surface used for mounting and script reads */
+export interface EmscriptenFS {
+    createNode(parent: WorkspaceFsNode | null, name: string, mode: number, rdev: number): WorkspaceFsNode
     isDir(mode: number): boolean
     isFile(mode: number): boolean
+    isLink(mode: number): boolean
+    mkdir(path: string): void
+    mount(type: WorkspaceFsType, opts: { rootPath: string }, mountpoint: string): void
+    readFile(path: string, opts?: { encoding?: string }): string | Uint8Array
+    ErrnoError: new (errno: number) => Error & { errno: number }
 }
 
-/**
- * Recursively sync files from ObservableInMemoryFs → Pyodide's Emscripten FS.
- * Creates directories as needed and writes all files.
- * Entries that can't be read are skipped and reported via `warnings`.
- */
-async function syncToEmscriptenFS(
-    srcFs: ObservableInMemoryFs,
-    emFs: EmscriptenFS,
-    srcPath: string,
-    emPath: string,
-    warnings: string[],
-): Promise<void> {
-    // Ensure target directory exists in Emscripten FS
-    try {
-        emFs.stat(emPath)
-    } catch {
-        emFs.mkdir(emPath)
-    }
-
-    let entries: string[]
-    try {
-        entries = await srcFs.readdir(srcPath)
-    } catch {
-        return
-    }
-
-    for (const entry of entries) {
-        const srcChild = srcPath === "/" ? `/${entry}` : `${srcPath}/${entry}`
-        const emChild = emPath === "/" ? `/${entry}` : `${emPath}/${entry}`
-
-        try {
-            const stat = await srcFs.stat(srcChild)
-            if (stat.isDirectory) {
-                await syncToEmscriptenFS(srcFs, emFs, srcChild, emChild, warnings)
-            } else {
-                const content = await srcFs.readFileBuffer(srcChild)
-                emFs.writeFile(emChild, content)
-            }
-        } catch (error) {
-            warnings.push(`skipped '${srcChild}' during sync to Python: ${error instanceof Error ? error.message : String(error)}`)
-        }
-    }
-}
-
-/**
- * Recursively sync files from Pyodide's Emscripten FS → ObservableInMemoryFs.
- * Only syncs files that differ or are new.
- * Entries that can't be written back are skipped and reported via `warnings` —
- * losing a file the user's Python just created must not pass silently.
- */
-async function syncFromEmscriptenFS(
-    emFs: EmscriptenFS,
-    dstFs: ObservableInMemoryFs,
-    emPath: string,
-    dstPath: string,
-    warnings: string[],
-): Promise<void> {
-    let entries: string[]
-    try {
-        entries = emFs.readdir(emPath).filter((e: string) => e !== "." && e !== "..")
-    } catch {
-        return
-    }
-
-    for (const entry of entries) {
-        const emChild = emPath === "/" ? `/${entry}` : `${emPath}/${entry}`
-        const dstChild = dstPath === "/" ? `/${entry}` : `${dstPath}/${entry}`
-
-        try {
-            const stat = emFs.stat(emChild)
-            if (emFs.isDir(stat.mode)) {
-                dstFs.mkdirSync(dstChild, { recursive: true })
-                await syncFromEmscriptenFS(emFs, dstFs, emChild, dstChild, warnings)
-            } else if (emFs.isFile(stat.mode)) {
-                const content = emFs.readFile(emChild) as Uint8Array
-                dstFs.writeFileSync(dstChild, content)
-            }
-        } catch (error) {
-            warnings.push(`failed to save '${dstChild}' from Python: ${error instanceof Error ? error.message : String(error)}`)
-        }
-    }
-}
 
 export class PyodideSession {
     private pyodide: PyodideAPI | null = null
+    private readonly workspaceMounts = new Map<string, WorkspaceMount>()
     private initPromise: Promise<void> | null = null
     private stdoutWriter?: (data: string) => void
     private readonly cdnUrl: string
@@ -173,15 +93,36 @@ export class PyodideSession {
                 packages: ["micropip"],
             })
 
-            // Set up the workspace directory in Pyodide FS
-            try {
-                this.pyodide.FS.mkdir("/workspace")
-            } catch {
-                // May already exist
-            }
+            // Default workspace mount — other roots are mounted lazily by
+            // ensureWorkspaceMount when a run's cwd demands them.
+            this.ensureWorkspaceMount("/workspace")
         })()
 
         await this.initPromise
+    }
+
+    /**
+     * Mount the write-through workspace FS at `rootPath` (idempotent).
+     * All Python FS mutations under the root hit the hub in real time.
+     */
+    private ensureWorkspaceMount(rootPath: string): WorkspaceMount {
+        const pyodide = this.pyodide!
+        let mount = this.workspaceMounts.get(rootPath)
+        if (!mount) {
+            try {
+                pyodide.FS.mkdir(rootPath)
+            } catch {
+                // May already exist
+            }
+            mount = createWorkspaceMount(
+                this.fs,
+                emscriptenPrimitives(pyodide.FS),
+                rootPath,
+            )
+            pyodide.FS.mount(mount.filesystemType, { rootPath }, rootPath)
+            this.workspaceMounts.set(rootPath, mount)
+        }
+        return mount
     }
 
     private getWorkspaceRoot(cwd: string): string {
@@ -218,10 +159,13 @@ export class PyodideSession {
         await this.ensureInitialized()
         const pyodide = this.pyodide!
 
-        // Sync filesystem before execution
+        // Mount the workspace write-through FS for this run's root and
+        // rebuild its node tree from the hub (source of truth). Lazy files
+        // are hydrated here — sync syscalls cannot await.
         const workspaceRoot = this.getWorkspaceRoot(cwd)
+        const mount = this.ensureWorkspaceMount(workspaceRoot)
         const syncWarnings: string[] = []
-        await syncToEmscriptenFS(this.fs, pyodide.FS, workspaceRoot, workspaceRoot, syncWarnings)
+        await mount.rebuildSkeleton(syncWarnings)
 
         let stdout = ""
         let stderr = ""
@@ -299,17 +243,19 @@ os.chdir(${JSON.stringify(cwd)})
             exitCode = 1
         }
 
-        // Sync filesystem after execution — on the success AND error path, so
-        // files written before a failure are preserved (real Python keeps
-        // partial outputs on non-zero exit).
+        // Write-through flush — on the success AND error path, so files
+        // written before a failure are preserved (real Python keeps partial
+        // outputs on non-zero exit). The mount has already forwarded most
+        // mutations in real time; this pushes what is left and drains the
+        // tracked hub operations.
         try {
-            const backSyncWarnings: string[] = []
-            await syncFromEmscriptenFS(pyodide.FS, this.fs, workspaceRoot, workspaceRoot, backSyncWarnings)
-            for (const warning of backSyncWarnings) {
+            const flushWarnings: string[] = []
+            await mount.flush(flushWarnings)
+            for (const warning of flushWarnings) {
                 stderr += `warning: ${warning}\n`
             }
-        } catch (syncError) {
-            const msg = syncError instanceof Error ? syncError.message : String(syncError)
+        } catch (flushError) {
+            const msg = flushError instanceof Error ? flushError.message : String(flushError)
             stderr += `warning: failed to sync filesystem changes: ${msg}\n`
         } finally {
             namespace.destroy()
