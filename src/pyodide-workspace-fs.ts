@@ -206,7 +206,9 @@ export class WorkspaceMount {
     private assignOps(node: WorkspaceFsNode): void {
         if (this.primitives.isDir(node.mode)) {
             node.node_ops = this.dirOps
-            node.stream_ops = null
+            // FS core also opens directory streams for scandir/importlib.
+            // It rejects directory reads/writes before dispatching these ops.
+            node.stream_ops = this.streamOps
         } else if (this.primitives.isFile(node.mode)) {
             node.node_ops = this.fileOps
             node.stream_ops = this.streamOps

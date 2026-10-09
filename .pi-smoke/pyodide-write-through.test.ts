@@ -140,4 +140,22 @@ with open("/workspace/trunc.txt") as f:
         expect(await hub.readFile("/workspace/seek.txt", "utf8")).toBe("0123456XYZ")
         expect(await hub.readFile("/workspace/trunc.txt", "utf8")).toBe("aa")
     })
+
+    it("scans mounted directories and imports workspace modules", async () => {
+        hub.mkdirSync("/workspace/import-smoke/nested", { recursive: true })
+        await hub.writeFile("/workspace/import-smoke/mounted_module.py", "VALUE = 42\n")
+        await mount.rebuildSkeleton([])
+
+        const value = await pyodide.runPythonAsync(`
+import os, sys
+with os.scandir("/workspace/import-smoke") as entries:
+    assert sorted((entry.name, entry.is_dir()) for entry in entries) == [
+        ("mounted_module.py", False), ("nested", True)
+    ]
+sys.path.insert(0, "/workspace/import-smoke")
+import mounted_module
+mounted_module.VALUE
+`)
+        expect(value).toBe(42)
+    })
 })

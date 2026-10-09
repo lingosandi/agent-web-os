@@ -237,4 +237,29 @@ describe("PyodideSession lifecycle", () => {
 
         session.dispose()
     })
+
+    it("does not let disposed initialization overwrite a new interpreter", async () => {
+        const hub = new ObservableInMemoryFs()
+        const session = new PyodideSessionWithRuntimeSequence(hub)
+        let finishOld!: (runtime: PyodideAPI) => void
+        const oldRuntime = new Promise<PyodideAPI>((resolve) => { finishOld = resolve })
+        session.runtimeFactories = [
+            () => oldRuntime,
+            async () => makeFakeRuntime(new FakePyodideFS()),
+        ]
+        const ctx = makeCtx(hub)
+        const oldRun = session.executePython(["-c", "epoch-1"], ctx)
+        const rejected = expect(oldRun).rejects.toThrow("disposed")
+        session.dispose()
+
+        await session.executePython(["-c", "epoch-2"], ctx)
+        finishOld(makeFakeRuntime(new FakePyodideFS()))
+        await rejected
+        await session.executePython(["-c", "epoch-2"], ctx)
+
+        expect(await hub.exists("/workspace/epoch1.txt")).toBe(false)
+        expect(await hub.readFile("/workspace/epoch2.txt", "utf8")).toBe("two")
+        expect(session.runtimeCalls).toBe(2)
+        session.dispose()
+    })
 })

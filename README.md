@@ -49,6 +49,11 @@ Note: Pyodide ≥ 0.28 accepts `pyodide_2025_0`-tagged wheels, and ≥ 0.29.4
 additionally accepts `pyemscripten_*`-tagged wheels (all published OCP.wasm /
 cadquery-OCP builds). On 0.27.x micropip rejects those tags.
 
+Node commands restore the host's `console` and `process` globals when execution
+finishes, including error exits. In browsers, Pyodide loads in a hidden isolated
+iframe so Node shims cannot force Node-only startup. Python's `js` module still
+exposes the host application; disposing the session removes the runtime iframe.
+
 ## xterm Integration
 
 Install xterm separately, attach it to your DOM node, mirror stdout into the terminal, and send keystrokes into `writeStdin` for interactive tools.

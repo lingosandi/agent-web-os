@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from "react"
 import type { Terminal } from "@xterm/xterm"
+import { AGENT_WEB_OS_VERSION } from "agent-web-os"
 import type { BrowserBashSession } from "agent-web-os"
 import "./App.css"
 
@@ -249,7 +250,7 @@ export default function App() {
 
             <main>
                 <div className="header-meta">
-                    <div>AGENT-WEB-OS // V.0.1.2</div>
+                    <div>AGENT-WEB-OS // V.{AGENT_WEB_OS_VERSION}</div>
                     <div>STATUS: KERNEL_READY</div>
                     <div className="header-links">
                         <a href="https://github.com/lingosandi/agent-web-os" target="_blank" rel="noopener noreferrer" className="header-btn">GitHub</a>

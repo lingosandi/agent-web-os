@@ -49,6 +49,10 @@ const session = createBrowserBashSession({
 `pyemscripten_*` 标签（所有已发布的 OCP.wasm / cadquery-OCP 构建均使用这些
 标签）。在 0.27.x 上 micropip 会拒绝这些标签。
 
+Node 命令结束后会恢复宿主的 `console` 和 `process` 全局对象，包括异常退出的情况，
+浏览器中的 Pyodide 在隐藏的独立 iframe 中加载，避免 Node shim 导致环境检测错误。
+Python 的 `js` 模块仍访问宿主应用；销毁会话时会移除运行时 iframe。
+
 ## xterm 集成
 
 单独安装 xterm，将其挂载到 DOM 节点，将 stdout 映射到终端，并将按键输入发送到 `writeStdin` 以支持交互式工具。

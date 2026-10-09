@@ -60,6 +60,7 @@ export class PyodideSession {
     private pyodide: PyodideAPI | null = null
     private readonly workspaceMounts = new Map<string, WorkspaceMount>()
     private initPromise: Promise<void> | null = null
+    private runtimeFrame: HTMLIFrameElement | null = null
     private stdoutWriter?: (data: string) => void
     private readonly cdnUrl: string
 
@@ -79,15 +80,37 @@ export class PyodideSession {
      *  a fake runtime to exercise the initialization lifecycle without the
      *  real WASM interpreter. */
     protected async createRuntime(): Promise<PyodideAPI> {
-        const { loadPyodide } = await import(
-            /* webpackIgnore: true */
-            `${this.cdnUrl}pyodide.mjs`
-        ) as { loadPyodide: (opts?: Record<string, unknown>) => Promise<PyodideAPI> }
+        type LoaderModule = { loadPyodide: (opts?: Record<string, unknown>) => Promise<PyodideAPI> }
+        let importRuntime = (url: string): Promise<LoaderModule> => import(/* webpackIgnore: true */ url)
+        let frame: HTMLIFrameElement | null = null
+        try {
+            if (typeof document !== "undefined") {
+                // Browser Node shims can exist before any command runs.
+                // A separate realm keeps Pyodide's platform detection native
+                // without temporarily mutating the host's global process.
+                frame = document.createElement("iframe")
+                frame.hidden = true
+                frame.title = "Python runtime"
+                frame.setAttribute("aria-hidden", "true")
+                document.documentElement.appendChild(frame)
+                this.runtimeFrame = frame
+                const realm = frame.contentWindow as (Window & typeof globalThis) | null
+                if (!realm) throw new Error("Unable to create Python runtime realm")
+                importRuntime = realm.Function("url", "return import(url)") as typeof importRuntime
+            }
 
-        return loadPyodide({
-            indexURL: this.cdnUrl,
-            packages: ["micropip"],
-        })
+            const { loadPyodide } = await importRuntime(`${this.cdnUrl}pyodide.mjs`)
+            return await loadPyodide({
+                indexURL: this.cdnUrl,
+                packages: ["micropip"],
+                // Preserve Python's `import js` access to the host application.
+                jsglobals: globalThis,
+            })
+        } catch (error) {
+            frame?.remove()
+            if (this.runtimeFrame === frame) this.runtimeFrame = null
+            throw error
+        }
     }
 
     private async ensureInitialized(): Promise<void> {
@@ -97,27 +120,26 @@ export class PyodideSession {
             return
         }
 
-        this.initPromise = (async () => {
-            this.pyodide = await this.createRuntime()
-
-            // Stale mounts from a previous interpreter lifecycle (dispose +
-            // re-init) bound the old WASM FS's node objects — drop them so
-            // every root is re-created against the new interpreter.
-            this.workspaceMounts.clear()
+        const initialization: Promise<void> = (async () => {
+            const runtime = await this.createRuntime()
+            if (this.initPromise !== initialization) {
+                throw new Error("Python initialization was disposed")
+            }
+            this.pyodide = runtime
 
             // Default workspace mount — other roots are mounted lazily by
             // ensureWorkspaceMount when a run's cwd demands them.
             this.ensureWorkspaceMount("/workspace")
         })()
+        this.initPromise = initialization
 
         try {
-            await this.initPromise
+            await initialization
         } catch (error) {
             // Retry the next invocation instead of caching the rejection
             // (e.g. a transient CDN failure would otherwise poison every
             // future python command in the session).
-            this.initPromise = null
-            this.pyodide = null
+            if (this.initPromise === initialization) this.dispose()
             throw error
         }
     }
@@ -422,6 +444,9 @@ micropip.uninstall([${packageList}])
     dispose(): void {
         this.pyodide = null
         this.initPromise = null
+        this.workspaceMounts.clear()
+        this.runtimeFrame?.remove()
+        this.runtimeFrame = null
     }
 }
 

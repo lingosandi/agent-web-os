@@ -72,6 +72,28 @@ describe("agent-web-os end-to-end smoke", () => {
         session.dispose()
     })
 
+    it.each([
+        { command: "node -e \"console.log(process.version)\"", success: true },
+        { command: "node -e \"throw new Error('runtime-failure')\"", success: false },
+    ])("restores host process after $command", async ({ command, success }) => {
+        const original = Object.getOwnPropertyDescriptor(globalThis, "process")
+        const originalProcess = Reflect.get(globalThis, "process")
+        const session = await createNodeBrowserBashSession({ rootPath: "/workspace" })
+        try {
+            const result = await executeBrowserBash(session, command)
+            expect(result.success).toBe(success)
+            expect(Object.getOwnPropertyDescriptor(globalThis, "process")).toEqual(original)
+            expect(Reflect.get(globalThis, "process")).toBe(originalProcess)
+        } finally {
+            session.dispose()
+            // Keep the host runner intact even when testing a broken runtime.
+            if (original) {
+                Object.defineProperty(globalThis, "process", original)
+                original.set?.call(globalThis, originalProcess)
+            } else Reflect.deleteProperty(globalThis, "process")
+        }
+    })
+
     it("npm install → node resolves the fresh package entry", async () => {
         const session = await createNodeBrowserBashSession({ rootPath: "/workspace" })
 

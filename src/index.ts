@@ -1,4 +1,4 @@
-export const AGENT_WEB_OS_VERSION = "0.5.0"
+export const AGENT_WEB_OS_VERSION = "0.5.1"
 console.log(`[agent-web-os] v${AGENT_WEB_OS_VERSION}`)
 
 export {

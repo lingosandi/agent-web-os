@@ -447,32 +447,45 @@ export class AlmostNodeSession {
     // observable FS). FIFO order prevents rename→unlink / write→unlink races.
     private mirrorChainTail: Promise<void> = Promise.resolve()
     private mirrorChainDepth = 0
-    // Ref-counted console silencing: node processes silence the shared
-    // `console` while running, but overlapping executions must not capture
-    // each other's no-op replacements as "previous" values (which would
-    // permanently silence the console after both finish).
+    // Overlapping executions share host globals. Capture the host once and
+    // restore it only after the last runtime exits, not from another shim.
     private static readonly silencedConsoleMethods = ["log", "info", "warn", "error", "debug", "trace", "dir", "table"] as const
-    private static consoleSilenceCount = 0
+    private static activeRuntimeCount = 0
     private static originalConsole: Record<string, unknown> | null = null
+    private static originalProcessDescriptor: PropertyDescriptor | undefined
+    private static originalProcess: unknown
 
-    private static silenceConsole(): void {
-        if (AlmostNodeSession.consoleSilenceCount === 0) {
+    private static acquireRuntimeGlobals(): void {
+        if (AlmostNodeSession.activeRuntimeCount === 0) {
+            AlmostNodeSession.originalProcessDescriptor = Object.getOwnPropertyDescriptor(globalThis, "process")
+            AlmostNodeSession.originalProcess = Reflect.get(globalThis, "process")
             AlmostNodeSession.originalConsole = {}
             for (const method of AlmostNodeSession.silencedConsoleMethods) {
                 AlmostNodeSession.originalConsole[method] = (console as unknown as Record<string, unknown>)[method]
                 ;(console as unknown as Record<string, unknown>)[method] = () => undefined
             }
         }
-        AlmostNodeSession.consoleSilenceCount++
+        AlmostNodeSession.activeRuntimeCount++
     }
 
-    private static unsilenceConsole(): void {
-        AlmostNodeSession.consoleSilenceCount = Math.max(0, AlmostNodeSession.consoleSilenceCount - 1)
-        if (AlmostNodeSession.consoleSilenceCount === 0 && AlmostNodeSession.originalConsole) {
+    private static releaseRuntimeGlobals(): void {
+        AlmostNodeSession.activeRuntimeCount = Math.max(0, AlmostNodeSession.activeRuntimeCount - 1)
+        if (AlmostNodeSession.activeRuntimeCount === 0 && AlmostNodeSession.originalConsole) {
             for (const method of AlmostNodeSession.silencedConsoleMethods) {
                 ;(console as unknown as Record<string, unknown>)[method] = AlmostNodeSession.originalConsole[method]
             }
+            // almostnode exposes its process shim globally. Leaving it behind
+            // makes browser loaders (including Pyodide) select Node-only APIs.
+            const descriptor = AlmostNodeSession.originalProcessDescriptor
+            if (descriptor) {
+                Object.defineProperty(globalThis, "process", descriptor)
+                descriptor.set?.call(globalThis, AlmostNodeSession.originalProcess)
+            } else {
+                Reflect.deleteProperty(globalThis, "process")
+            }
             AlmostNodeSession.originalConsole = null
+            AlmostNodeSession.originalProcessDescriptor = undefined
+            AlmostNodeSession.originalProcess = undefined
         }
     }
 
@@ -2403,7 +2416,7 @@ exports.LRUCache = LRUCache;
         const exitPromise = new Promise<number>((resolve) => {
             resolveExit = resolve
         })
-        AlmostNodeSession.silenceConsole()
+        AlmostNodeSession.acquireRuntimeGlobals()
         process.exit = ((code = 0) => {
             if (!exitCalled) {
                 exitCalled = true
@@ -2518,7 +2531,7 @@ exports.LRUCache = LRUCache;
                 globalThis.removeEventListener("unhandledrejection", rejectionHandler)
             }
             process.exit = originalExit
-            AlmostNodeSession.unsilenceConsole()
+            AlmostNodeSession.releaseRuntimeGlobals()
         }
     }
 
