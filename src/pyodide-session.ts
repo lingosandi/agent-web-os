@@ -63,16 +63,18 @@ export class PyodideSession {
     private runtimeFrame: HTMLIFrameElement | null = null
     private stdoutWriter?: (data: string) => void
     private readonly cdnUrl: string
+    private readonly runtimeOptions: Record<string, unknown>
 
     constructor(
         private readonly fs: ObservableInMemoryFs,
-        options: { pyodideVersion?: string; pyodideBaseUrl?: string } = {},
+        options: { pyodideVersion?: string; pyodideBaseUrl?: string; pyodideOptions?: Record<string, unknown> } = {},
     ) {
         this.cdnUrl =
             options.pyodideBaseUrl ??
             (options.pyodideVersion
                 ? `https://cdn.jsdelivr.net/pyodide/v${options.pyodideVersion}/full/`
                 : DEFAULT_PYODIDE_CDN_URL)
+        this.runtimeOptions = options.pyodideOptions ?? {}
     }
 
 
@@ -105,6 +107,9 @@ export class PyodideSession {
                 packages: ["micropip"],
                 // Preserve Python's `import js` access to the host application.
                 jsglobals: globalThis,
+                // Caller-supplied overrides (e.g. lockFileURL/lockFileContents
+                // to boot from a frozen custom lockfile). Explicit keys win.
+                ...this.runtimeOptions,
             })
         } catch (error) {
             frame?.remove()

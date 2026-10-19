@@ -66,6 +66,13 @@ type BrowserBashSessionOptions = {
     pyodideVersion?: string
     /** Full base URL of a Pyodide distribution to load instead of the CDN (must end with "/"). (default: jsdelivr CDN at `pyodideVersion`) */
     pyodideBaseUrl?: string
+    /**
+     * Extra options passed through to `loadPyodide()` (spread after the
+     * built-in `indexURL`/`packages`/`jsglobals` defaults, so explicit keys
+     * override them). Primary use: `lockFileURL`/`lockFileContents` to boot
+     * from a frozen custom lockfile instead of runtime name resolution.
+     */
+    pyodideOptions?: Record<string, unknown>
     /** Additional custom commands to register alongside the built-in commands */
     customCommands?: CustomCommand[]
 }
@@ -138,6 +145,7 @@ export function createBrowserBashSession(options: BrowserBashSessionOptions = {}
                 pyodideSession = new mod.PyodideSession(fs, {
                     pyodideVersion: options.pyodideVersion,
                     pyodideBaseUrl: options.pyodideBaseUrl,
+                    pyodideOptions: options.pyodideOptions,
                 })
                 if (internals.currentStdoutWriter) pyodideSession.setStdoutWriter(internals.currentStdoutWriter)
                 return pyodideSession
